@@ -1,0 +1,4 @@
+# Handle clusterposes to simulate fake sensor readings
+geometry_msgs/PoseArray poses
+---
+bool success

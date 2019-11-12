@@ -1,0 +1,14 @@
+<package>
+  <description brief="amcl_wakeup">
+
+     amcl_wakeup
+
+  </description>
+  <author>deku</author>
+  <license>BSD</license>
+  <review status="unreviewed" notes=""/>
+  <url>http://ros.org/wiki/amcl_wakeup</url>
+
+</package>
+
+
