@@ -343,7 +343,6 @@ void pf_update_resample(pf_t *pf)
   set_b->sample_count = 0;
 
   w_diff = 1.0 - pf->w_fast / pf->w_slow;
-  printf("the w_diff is: %f \n", w_diff);
   if(w_diff < 0.0)
     w_diff = 0.0;
   //printf("w_diff: %9.6f\n", w_diff);

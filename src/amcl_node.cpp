@@ -1406,7 +1406,6 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
 
       tf2::Quaternion q;
       q.setRPY(0, 0, hyps[max_weight_hyp].pf_pose_mean.v[2]);
-      std::cout << "amcl_pose yaw is" << hyps[max_weight_hyp].pf_pose_mean.v[2] << std::endl;
       tf2::convert(q, p.pose.pose.orientation);
       // Copy in the covariance, converting from 3-D to 6-D
       pf_sample_set_t* set = pf_->sets + pf_->current_set;

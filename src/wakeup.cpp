@@ -47,6 +47,7 @@ class WakeUp
     ros::NodeHandle nh_;
     ros::Subscriber cluster_pose_sub;
     ros::Publisher marker_pub;    
+    ros::Publisher marker_pub_;
     mutex mutex_;
 
     int range_count;
@@ -63,14 +64,15 @@ class WakeUp
 
     map_t* map_;
     bool use_map_topic;
-    bool IFVISUALIZE;
+    bool IFVISUALIZE_FAKE_LASER;
+    bool IFVISUALIZE_SEARCH;
 
     void requestMap();
     void handleMapMessage(const nav_msgs::OccupancyGrid& msg);
     void freememory();
     map_t* convertMap(const nav_msgs::OccupancyGrid& map_msg);
     void clusterPoseReceived(const geometry_msgs::PoseArrayPtr& msg);
-    void laserSimulate();
+    bool laserSimulate();
     // cluster callbacks
     void handleClusterPose(const geometry_msgs::PoseArray& msg);
     void calc_fake_readings_stats();
@@ -86,11 +88,13 @@ WakeUp::WakeUp()
     max_range = 2.0;
     min_range = 0.1;
     grid_size = 0.05;
-    search_width = 1.0; // meters
+    search_width = 4.0; // meters
     max_beams = 48;
-    IFVISUALIZE = false;
+    IFVISUALIZE_FAKE_LASER = true;
+    IFVISUALIZE_SEARCH = true;
     cluster_pose_sub = nh_.subscribe("cluster_poses", 2, &WakeUp::clusterPoseReceived, this);
-    marker_pub = nh_.advertise<visualization_msgs::Marker>("visualization_marker", 2);
+    marker_pub = nh_.advertise<visualization_msgs::Marker>("visualization_fakelaser_marker", 2);
+    marker_pub_ = nh_.advertise<visualization_msgs::Marker>("visualization_search_marker", 2);    
     if (!use_map_topic)
     {
         requestMap();
@@ -129,7 +133,7 @@ void WakeUp::handleClusterPose(const geometry_msgs::PoseArray& msg)
     p.v[2] = yaw;
     cluster_poses.push_back(p);
   }
-  
+  ROS_INFO("%d cluster poses got!!!", cluster_poses.size());
     // lock_guard<mutex> guard(mutex_);
   if (cluster_poses.size()==1)
     ROS_INFO("amcl pose converges, no need to do grid map searching!");
@@ -140,7 +144,7 @@ void WakeUp::handleClusterPose(const geometry_msgs::PoseArray& msg)
   }
 }
 
-void WakeUp::laserSimulate()
+bool WakeUp::laserSimulate()
 {
 
   // for each potential cluster pose
@@ -159,7 +163,27 @@ void WakeUp::laserSimulate()
   points.color.r = 1.0f;
   points.color.g = 1.0f;
   points.color.a = 1.0;
-  
+  // check if all tmp poses are valid
+  for (int i=0; i<cluster_poses_tmp.size(); i++)
+  {
+    double x,y;
+    x = cluster_poses_tmp[i].v[0];
+    y = cluster_poses_tmp[i].v[1];
+    int mi_, mj_;
+    mi_ = MAP_GXWX(map_, x);
+    mj_ = MAP_GXWX(map_, y);
+
+    if (!MAP_VALID(map_, mi_, mj_))
+      return false;
+
+    else
+    {
+      int occ_state;
+      occ_state = map_->cells[MAP_INDEX(map_,mi_,mj_)].occ_state;
+      if (occ_state == 1)
+        return false;
+    }
+  }
 
   for(int i=0; i<cluster_poses_tmp.size(); i++)
   {
@@ -185,7 +209,6 @@ void WakeUp::laserSimulate()
               //  "range*cos(theta) is %f \n"
               //  "range*sin(theta) is %f \n"
               //  "pose_x is %f pose_y is %f !!!", simx, simy, range*cos(theta), range*sin(theta), cluster_poses[i].v[0], cluster_poses[i].v[1]);
-
 
       if (MAP_VALID(map_, mi, mj))
       {
@@ -219,11 +242,14 @@ void WakeUp::laserSimulate()
         } while (range <= max_range-grid_size/2.0);
       }
 
-      geometry_msgs::Point p;
-      p.x = MAP_WXGX(map_,mi);
-      p.y = MAP_WYGY(map_,mj);
-      p.z = 0.0;
-      points.points.push_back(p); 
+      if (IFVISUALIZE_FAKE_LASER)
+      {
+        geometry_msgs::Point p;
+        p.x = MAP_WXGX(map_,mi);
+        p.y = MAP_WYGY(map_,mj);
+        p.z = 0.0;
+        points.points.push_back(p); 
+      }
   
       if (range>max_range)
         range = max_range;
@@ -232,10 +258,10 @@ void WakeUp::laserSimulate()
     fake_readings_clust.push_back(fake_readings);
     // ROS_INFO("simu_reading !!! size is %d", simu_readings_clust.size());
   }
-  if (IFVISUALIZE)
+  if (IFVISUALIZE_FAKE_LASER)
     marker_pub.publish(points);
-  
-  calc_fake_readings_stats();
+
+  return true;
 }
 
 void WakeUp::grid_map_search()
@@ -258,8 +284,7 @@ void WakeUp::grid_map_search()
   vector<double> theta_turned, theta_loop;
   theta_turned.resize(cluster_poses.size());
   theta_loop.resize(cluster_poses.size());
-  // loop over each spiral
-  int ct=0;
+
   while (search_width_t <= search_width)
   {
     // clear tmp cluster poses
@@ -269,8 +294,6 @@ void WakeUp::grid_map_search()
     // loop over each grid in one spiral
     for (int c_loop_count=1; c_loop_count<=loop_width_count*8; c_loop_count++)
     {
-      ct++;
-      cout << "current looping: ct is" << ct << endl;
       // for each grid loop over all cluster poses
       for (int i=0; i<cluster_poses.size(); i++)
       {
@@ -296,20 +319,50 @@ void WakeUp::grid_map_search()
 
           cluster_poses_tmp[i].v[0] += step*cos(t);
           cluster_poses_tmp[i].v[1] += step*sin(t);
+          cout << "cluster_poses_tmp yaw " << i << "is " << cluster_poses_tmp[i].v[2] << endl;  
         }
       }
-      // set if_first to false
-      // if_first = false;
 
-      laserSimulate();
-      ROS_INFO("the mean cov fake readings is %f ", mean_cov_fake_readings); 
-      if (mean_cov_fake_readings > 100.0)
-        return;
+      if (laserSimulate()) // Simulate Succeed, which means tmp poses are valid
+      {
+        if (IFVISUALIZE_SEARCH)
+        {
+          visualization_msgs::Marker points;
+          points.header.frame_id = "map";
+          points.ns = "grid_search";
+          points.header.stamp = ros::Time::now();
+          points.action = visualization_msgs::Marker::ADD;
+          points.pose.orientation.w = 1.0;
+          points.id = 0;
+          points.type = visualization_msgs::Marker::POINTS;
+          points.scale.x = 0.3;
+          points.scale.y = 0.3;
+
+          // Points are green
+          points.color.b = 1.0f;
+          points.color.a = 1.0;
+
+          for(int i=0; i<cluster_poses_tmp.size(); i++)
+          {
+            geometry_msgs::Point p;
+            p.x = cluster_poses_tmp[i].v[0];
+            p.y = cluster_poses_tmp[i].v[1];
+            p.z = 0.0;
+            points.points.push_back(p); 
+          }
+          marker_pub_.publish(points);
+        }
+        calc_fake_readings_stats();
+        if (mean_cov_fake_readings > 20.0)
+          {
+            ROS_INFO("Distinctive grids found!!! Check tmp poses for navigation");
+            return;
+          }
+      }
     }
-
     search_width_t += grid_size;  
   }
-  ROS_INFO("SEARCHING finished, no distinctive girds found!!!");
+  ROS_INFO("SEARCHING FINISHED, no distinctive girds found!!!");
 }
   
 
@@ -319,14 +372,13 @@ void WakeUp::calc_fake_readings_stats()
   int i, j;
   vector<double> mean_fake_readings;
   vector<double> cov_fake_readings;
-  mean_fake_readings.resize(max_beams, 0);
+  mean_fake_readings.resize(max_beams, 0.0);
   // cov_fake_readings.resize(max_beams, 0);
   double cov_accumulate = 0.0;
   for (i=0; i<fake_readings_clust.size(); i++)
   {
     for (j=0; j<max_beams; j++)
     {
-      ROS_ASSERT(fake_readings_clust[i].size() == max_beams);
       mean_fake_readings[j] += 1.0/fake_readings_clust.size() * fake_readings_clust[i][j];
     }
   }
@@ -338,7 +390,9 @@ void WakeUp::calc_fake_readings_stats()
                         * pow(fake_readings_clust[i][j]-mean_fake_readings[j], 2);
     }
   }
-  mean_cov_fake_readings = cov_accumulate;
+  mean_cov_fake_readings = cov_accumulate; 
+  ROS_INFO("the mean cov fake readings is %f ", mean_cov_fake_readings); 
+
 }
 
 void WakeUp::freememory()
