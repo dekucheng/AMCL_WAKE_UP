@@ -45,6 +45,7 @@ class WakeUp
  
  private:
     ros::NodeHandle nh_;
+    ros::NodeHandle private_nh_;
     ros::Subscriber cluster_pose_sub;
     ros::Publisher marker_pub;    
     ros::Publisher marker_pub_;
@@ -80,11 +81,14 @@ class WakeUp
     void handleClusterPose(const geometry_msgs::PoseArray& msg);
     void calc_fake_readings_stats();
     void grid_map_search();
-    
 
+    double z_hit, z_rand, sigma_hit;
+    void SimuBeamModelConfig();
+    double LikelihoodFieldModel(const vector<double> &fake_reading, const vector<pf_vector_t> &poses);
 };
 
-WakeUp::WakeUp()
+WakeUp::WakeUp() :
+      private_nh_("~")
 {
     use_map_topic = false;
     laser_simu_req = true;
@@ -104,6 +108,7 @@ WakeUp::WakeUp()
     marker_pub_ = nh_.advertise<visualization_msgs::Marker>("visualization_search_marker", 2);    
     if (!use_map_topic)
     {
+        SimuBeamModelConfig();
         requestMap();
     }
 }
@@ -145,63 +150,53 @@ void WakeUp::handleClusterPose(const geometry_msgs::PoseArray& msg)
     ROS_INFO("amcl pose converges, no need to do grid map searching!");
   else
   {
-    grid_map_search();
-    laser_simu_req = false;
+    // grid_map_search();
+    
+    laserSimulate();
+    double score = LikelihoodFieldModel(fake_readings_clust[0], cluster_poses);
+    cout << "the cluster scores varriance is : --- " << score << "---!!" << endl;
+    laser_simu_req = true;
   }
 }
 
 bool WakeUp::laserSimulate()
 {
+  laser_simu_req = false;
   // clear fake readings
   fake_readings_clust.clear();
   // for each potential cluster pose
-  visualization_msgs::Marker points;
-  points.header.frame_id = "map";
-  points.ns = "fake_scan";
-  points.header.stamp = ros::Time::now();
-  points.action = visualization_msgs::Marker::ADD;
-  points.pose.orientation.w = 1.0;
-  points.id = 0;
-  points.type = visualization_msgs::Marker::POINTS;
-  points.scale.x = 0.03;
-  points.scale.y = 0.03;
 
-  // Points are green
-  points.color.r = 1.0f;
-  points.color.g = 1.0f;
-  points.color.a = 1.0;
   // check if all tmp poses are valid
-  for (int i=0; i<cluster_poses_tmp.size(); i++)
+  // for (int i=0; i<cluster_poses_tmp.size(); i++)
+  // {
+  //   double x,y;
+  //   x = cluster_poses_tmp[i].v[0];
+  //   y = cluster_poses_tmp[i].v[1];
+  //   int mi_, mj_;
+  //   mi_ = MAP_GXWX(map_, x);
+  //   mj_ = MAP_GXWX(map_, y);
+
+  //   if (!MAP_VALID(map_, mi_, mj_))
+  //     return false;
+
+  //   else
+  //   {
+  //     int occ_state;
+  //     double occ_dist;
+  //     occ_state = map_->cells[MAP_INDEX(map_,mi_,mj_)].occ_state;
+  //     occ_dist = map_->cells[MAP_INDEX(map_,mi_,mj_)].occ_dist;
+  //     if (occ_state != -1 || occ_dist < 0.15)
+  //       {
+  //         return false;
+  //       }
+  //   }
+  // }
+
+  for(int i=0; i<1; i++)
   {
-    double x,y;
-    x = cluster_poses_tmp[i].v[0];
-    y = cluster_poses_tmp[i].v[1];
-    int mi_, mj_;
-    mi_ = MAP_GXWX(map_, x);
-    mj_ = MAP_GXWX(map_, y);
-
-    if (!MAP_VALID(map_, mi_, mj_))
-      return false;
-
-    else
-    {
-      int occ_state;
-      double occ_dist;
-      occ_state = map_->cells[MAP_INDEX(map_,mi_,mj_)].occ_state;
-      occ_dist = map_->cells[MAP_INDEX(map_,mi_,mj_)].occ_dist;
-      if (occ_state != -1 || occ_dist < 0.15)
-        {
-          return false;
-        }
-    }
-  }
-
-  for(int i=0; i<cluster_poses_tmp.size(); i++)
-  {
-    double theta = cluster_poses_tmp[i].v[2];
+    double theta = cluster_poses[i].v[2];
     double dtheta;
 
-    theta -= M_PI;
     dtheta = (2*M_PI / (double)max_beams);
     vector<double> fake_readings;
     for (int j=0; j<max_beams; j++)
@@ -211,8 +206,8 @@ bool WakeUp::laserSimulate()
       double range = min_range;
       double simx, simy;
       int mi, mj, last_mi, last_mj;
-      simx = range*cos(theta) + cluster_poses_tmp[i].v[0];
-      simy = range*sin(theta) + cluster_poses_tmp[i].v[1];
+      simx = range*cos(theta) + cluster_poses[i].v[0];
+      simy = range*sin(theta) + cluster_poses[i].v[1];
       mi = MAP_GXWX(map_, simx);
       mj = MAP_GYWY(map_, simy);
       // ROS_INFO("!!! fake scan simx is %f, \n"
@@ -228,8 +223,8 @@ bool WakeUp::laserSimulate()
         do
         {
           range += grid_size/2.0;
-          simx = range*cos(theta) + cluster_poses_tmp[i].v[0];
-          simy = range*sin(theta) + cluster_poses_tmp[i].v[1];
+          simx = range*cos(theta) + cluster_poses[i].v[0];
+          simy = range*sin(theta) + cluster_poses[i].v[1];
           mi = MAP_GXWX(map_, simx);
           mj = MAP_GYWY(map_, simy);
 
@@ -252,15 +247,6 @@ bool WakeUp::laserSimulate()
             continue;
         } while (range <= max_range-grid_size/2.0);
       }
-
-      if (IFVISUALIZE_FAKE_LASER)
-      {
-        geometry_msgs::Point p;
-        p.x = MAP_WXGX(map_,mi);
-        p.y = MAP_WYGY(map_,mj);
-        p.z = 0.0;
-        points.points.push_back(p); 
-      }
   
       if (range>max_range)
         range = max_range;
@@ -269,9 +255,6 @@ bool WakeUp::laserSimulate()
     fake_readings_clust.push_back(fake_readings);
     // ROS_INFO("simu_reading !!! size is %d", simu_readings_clust.size());
   }
-  if (IFVISUALIZE_FAKE_LASER)
-    marker_pub.publish(points);
-
   return true;
 }
 
@@ -379,7 +362,7 @@ void WakeUp::grid_map_search()
           mean.push_back(mean_cov_fake_readings);
         }
         double mean_ = 0;
-        
+
         for (auto x:mean) {mean_+=x/6.0;}
 
         if (mean_ > 1.5)
@@ -459,10 +442,108 @@ void WakeUp::handleMapMessage(const nav_msgs::OccupancyGrid& msg)
     map_ = convertMap(msg);
 }
 
-void sigintHandler(int sig)
+void WakeUp::SimuBeamModelConfig()
 {
-    ROS_INFO("Shutting Down ...");
-    ros::shutdown();
+  private_nh_.param("laser_z_hit", z_hit, 0.95);
+  private_nh_.param("laser_z_rand", z_rand, 0.05);
+  private_nh_.param("laser_sigma_hit", sigma_hit, 0.2);
+}
+
+double WakeUp::LikelihoodFieldModel(const vector<double> &fake_reading, const vector<pf_vector_t> &poses)
+{
+  int i,j;
+  double z,pz;
+  double p;
+  double total_score = 0.0;
+  pf_vector_t hit, pose;
+
+  vector<double> clust_scores;
+
+  visualization_msgs::Marker points;
+  points.header.frame_id = "map";
+  points.ns = "fake_scan";
+  points.header.stamp = ros::Time::now();
+  points.action = visualization_msgs::Marker::ADD;
+  points.pose.orientation.w = 1.0;
+  points.id = 0;
+  points.type = visualization_msgs::Marker::POINTS;
+  points.scale.x = 0.03;
+  points.scale.y = 0.03;
+
+  // Points are green
+  points.color.r = 1.0f;
+  points.color.g = 1.0f;
+  points.color.a = 1.0;
+
+  for (j=0; j<poses.size(); j++)
+  {
+    pose = poses[j];
+
+    p = 1.0;
+
+    double z_hit_denom = 2 * sigma_hit * sigma_hit;
+    double z_rand_mult = 1.0/max_range;
+
+    double obs_range;
+    double obs_bearing = pose.v[2];
+    for (i=0; i<fake_reading.size(); i++)
+    {
+      obs_bearing += (2.0*M_PI/max_beams) * i;
+      obs_range = fake_reading[i];
+
+      if (obs_range >= max_range)
+        continue;
+      
+      pz = 0.0;
+
+      hit.v[0] = pose.v[0] + obs_range * cos(obs_bearing);
+      hit.v[1] = pose.v[1] + obs_range * sin(obs_bearing);
+
+      int mi, mj;
+      mi = MAP_GXWX(map_, hit.v[0]);
+      mj = MAP_GYWY(map_, hit.v[1]);
+
+      if(!MAP_VALID(map_, mi, mj))
+        z = map_->max_occ_dist;
+      else
+        z = map_->cells[MAP_INDEX(map_,mi,mj)].occ_dist;
+
+      // score for a single reading
+      pz += z_hit * exp(-(z * z) / z_hit_denom);
+      // Part 2: random measurements
+      pz += z_rand * z_rand_mult;
+
+      assert(pz <= 1.0);
+      assert(pz >= 0.0);
+
+      p += pz*pz*pz;
+
+      // visualize fake readings
+      geometry_msgs::Point p;
+      p.x = MAP_WXGX(map_,mi);
+      p.y = MAP_WYGY(map_,mj);
+      p.z = 0.0;
+      points.points.push_back(p); 
+
+    }
+    clust_scores.push_back(p);
+    total_score += p;
+    cout << "p for cluster" << j << "is :" << p << endl;
+    
+  }
+
+  // calculate varriance 
+  double mean = total_score/(double)poses.size();
+  double var=0.0;
+  for (int i=0; i<clust_scores.size(); i++)
+  {
+    var += 1/(double)clust_scores.size() * pow((clust_scores[i]-mean), 2);
+  }
+   
+  if (IFVISUALIZE_FAKE_LASER)
+    marker_pub.publish(points);
+
+  return var;
 }
 
 
@@ -492,6 +573,14 @@ map_t* WakeUp::convertMap( const nav_msgs::OccupancyGrid& map_msg )
 
   return map;
 }
+
+void sigintHandler(int sig)
+{
+    ROS_INFO("Shutting Down ...");
+    ros::shutdown();
+}
+
+
 
 int main(int argc, char** argv)
 {
