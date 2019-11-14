@@ -284,6 +284,8 @@ double AMCLLaser::LikelihoodFieldModel(AMCLLaserData *data, pf_sample_set_t* set
       pz += self->z_hit * exp(-(z * z) / z_hit_denom);
       // Part 2: random measurements
       pz += self->z_rand * z_rand_mult;
+      
+      // printf("the occ dist z is %f\n", z);
 
       // TODO: outlier rejection for short readings
 

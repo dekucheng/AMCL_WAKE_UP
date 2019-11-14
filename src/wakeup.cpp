@@ -63,7 +63,10 @@ class WakeUp
     double mean_cov_fake_readings;
 
     map_t* map_;
+    bool map_converted;
     bool use_map_topic;
+    double max_occ_dist;
+
     bool IFVISUALIZE_FAKE_LASER;
     bool IFVISUALIZE_SEARCH;
 
@@ -85,11 +88,15 @@ WakeUp::WakeUp()
 {
     use_map_topic = false;
     laser_simu_req = true;
+    map_converted = false;
+
     max_range = 2.0;
     min_range = 0.1;
     grid_size = 0.05;
     search_width = 4.0; // meters
-    max_beams = 48;
+    max_beams = 72;
+    max_occ_dist = 2.0;
+
     IFVISUALIZE_FAKE_LASER = true;
     IFVISUALIZE_SEARCH = true;
     cluster_pose_sub = nh_.subscribe("cluster_poses", 2, &WakeUp::clusterPoseReceived, this);
@@ -107,7 +114,7 @@ WakeUp::~WakeUp()
 
 void WakeUp::clusterPoseReceived(const geometry_msgs::PoseArrayPtr& msg)
 {
-  if (laser_simu_req)
+  if (laser_simu_req && map_converted)
     handleClusterPose(*msg);
   ros::Duration(2.0).sleep();
 }
@@ -115,7 +122,6 @@ void WakeUp::clusterPoseReceived(const geometry_msgs::PoseArrayPtr& msg)
 void WakeUp::handleClusterPose(const geometry_msgs::PoseArray& msg)
 {
   cluster_poses.clear();
-  fake_readings_clust.clear();
   for (int i=0; i<msg.poses.size(); i++)
   {
     pf_vector_t p;
@@ -146,7 +152,8 @@ void WakeUp::handleClusterPose(const geometry_msgs::PoseArray& msg)
 
 bool WakeUp::laserSimulate()
 {
-
+  // clear fake readings
+  fake_readings_clust.clear();
   // for each potential cluster pose
   visualization_msgs::Marker points;
   points.header.frame_id = "map";
@@ -179,16 +186,20 @@ bool WakeUp::laserSimulate()
     else
     {
       int occ_state;
+      double occ_dist;
       occ_state = map_->cells[MAP_INDEX(map_,mi_,mj_)].occ_state;
-      if (occ_state == 1)
-        return false;
+      occ_dist = map_->cells[MAP_INDEX(map_,mi_,mj_)].occ_dist;
+      if (occ_state != -1 || occ_dist < 0.15)
+        {
+          return false;
+        }
     }
   }
 
   for(int i=0; i<cluster_poses_tmp.size(); i++)
   {
     double theta = cluster_poses_tmp[i].v[2];
-    double theta_start, dtheta;
+    double dtheta;
 
     theta -= M_PI;
     dtheta = (2*M_PI / (double)max_beams);
@@ -231,7 +242,7 @@ bool WakeUp::laserSimulate()
             {
               int occ_state;
               occ_state = map_->cells[MAP_INDEX(map_,mi,mj)].occ_state;
-              if (occ_state == 1)
+              if (occ_state != -1)
                 break;
             }
             last_mi = mi;
@@ -292,6 +303,9 @@ void WakeUp::grid_map_search()
     loop_width_count++;
     // bool if_first = true;
     // loop over each grid in one spiral
+    vector<double> mean;
+    
+    bool if_mean_init = false;
     for (int c_loop_count=1; c_loop_count<=loop_width_count*8; c_loop_count++)
     {
       // for each grid loop over all cluster poses
@@ -319,9 +333,9 @@ void WakeUp::grid_map_search()
 
           cluster_poses_tmp[i].v[0] += step*cos(t);
           cluster_poses_tmp[i].v[1] += step*sin(t);
-          cout << "cluster_poses_tmp yaw " << i << "is " << cluster_poses_tmp[i].v[2] << endl;  
         }
       }
+
 
       if (laserSimulate()) // Simulate Succeed, which means tmp poses are valid
       {
@@ -353,9 +367,24 @@ void WakeUp::grid_map_search()
           marker_pub_.publish(points);
         }
         calc_fake_readings_stats();
-        if (mean_cov_fake_readings > 20.0)
+        if (!if_mean_init)
+        {
+          mean.push_back(mean_cov_fake_readings);
+          if (mean.size()==6)
+            if_mean_init = true;
+        }
+        else
+        {
+          mean.erase(mean.begin());
+          mean.push_back(mean_cov_fake_readings);
+        }
+        double mean_ = 0;
+        
+        for (auto x:mean) {mean_+=x/6.0;}
+
+        if (mean_ > 1.5)
           {
-            ROS_INFO("Distinctive grids found!!! Check tmp poses for navigation");
+            ROS_INFO("Distinctive grids found!!! Check tmp poses for navigation mean cov is %f", mean_);
             return;
           }
       }
@@ -388,6 +417,7 @@ void WakeUp::calc_fake_readings_stats()
     {
       cov_accumulate += 1.0/fake_readings_clust.size() 
                         * pow(fake_readings_clust[i][j]-mean_fake_readings[j], 2);
+      // ROS_INFO("fake range for cluster %d is: %f", i, fake_readings_clust[i][j]);
     }
   }
   mean_cov_fake_readings = cov_accumulate; 
@@ -416,6 +446,11 @@ void WakeUp::requestMap()
     d.sleep();
   }
   handleMapMessage( resp.map );
+
+  // update occ distance in map
+  map_update_cspace(this->map_, max_occ_dist);
+  map_converted = true;
+  ROS_INFO("map converted");
 }
 
 void WakeUp::handleMapMessage(const nav_msgs::OccupancyGrid& msg)
