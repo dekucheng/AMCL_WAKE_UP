@@ -48,12 +48,11 @@ class WakeUp
 
     ros::NodeHandle nh_;
     ros::NodeHandle private_nh_;
-    ros::Subscriber cluster_pose_sub;
+    ros::Subscriber cluster_pose_sub, amcl_pose_sub;
     ros::Publisher marker_pub;    
     ros::Publisher marker_pub_;
     mutex mutex_;
 
-    int range_count;
     int max_beams;
     double max_range;
     double min_range;
@@ -88,27 +87,25 @@ class WakeUp
     double score_threshold;
     void SimuBeamModelConfig();
     double LikelihoodFieldModel(const vector<double> &fake_reading, const vector<pf_vector_t> &poses);
+    geometry_msgs::Po
 };
 
 WakeUp::WakeUp() :
-      private_nh_("~"),
-      DEBUG(false)
+      private_nh_("~")
 {
     use_map_topic = false;
     laser_simu_req = true;
     map_converted = false;
 
-    max_range = 3.0;
-    min_range = 0.1;
     grid_size = 0.05;
     search_width = 4.0; // meters
     max_occ_dist = 2.0;
 
-    IFVISUALIZE_FAKE_LASER = true;
-    IFVISUALIZE_SEARCH = true;
     cluster_pose_sub = nh_.subscribe("cluster_poses", 2, &WakeUp::clusterPoseReceived, this);
+    amcl_pose_sub = nh_subscribe("amcl_pose", 2, &WakeUp::updategoalpose, this);
     marker_pub = nh_.advertise<visualization_msgs::Marker>("visualization_fakelaser_marker", 2);
     marker_pub_ = nh_.advertise<visualization_msgs::Marker>("visualization_search_marker", 2);    
+    
     if (!use_map_topic)
     {
         SimuBeamModelConfig();
@@ -154,8 +151,13 @@ void WakeUp::handleClusterPose(const geometry_msgs::PoseArray& msg)
   else
   {
     // keep updating current searching grid poses
-    grid_map_search();
-
+    if (DEBUG)
+      {
+        ROS_INFO("Starting DEBUG MODE!!!");
+        double cross_entropy = LikelihoodFieldModel(fake_readings_clust[0], cluster_poses);
+      }
+    else
+      grid_map_search();
     // laser_simu_req = true;
   }
 }
@@ -165,36 +167,36 @@ bool WakeUp::laserSimulate()
   // clear fake readings
   fake_readings_clust.clear();
   // check if all tmp poses are valid
-  for (int i=0; i<cluster_poses_tmp.size(); i++)
-  {
-    double x,y;
-    x = cluster_poses_tmp[i].v[0];
-    y = cluster_poses_tmp[i].v[1];
-    int mi_, mj_;
-    mi_ = MAP_GXWX(map_, x);
-    mj_ = MAP_GXWX(map_, y);
-
-    if (!MAP_VALID(map_, mi_, mj_))
-      return false;
-
-    else
-    {
-      int occ_state;
-      double occ_dist;
-      occ_state = map_->cells[MAP_INDEX(map_,mi_,mj_)].occ_state;
-      occ_dist = map_->cells[MAP_INDEX(map_,mi_,mj_)].occ_dist;
-      if (occ_state != -1 || occ_dist < 0.15)
-        {
-          return false;
-        }
-    }
-  }
 
   pf_vector_t P;
   if (DEBUG)
     P = cluster_poses[0];
   else
+  {
     P = cluster_poses_tmp[0];
+    for (int i=0; i<cluster_poses_tmp.size(); i++)
+    {
+      double x,y;
+      x = cluster_poses_tmp[i].v[0];
+      y = cluster_poses_tmp[i].v[1];
+      int mi_, mj_;
+      mi_ = MAP_GXWX(map_, x);
+      mj_ = MAP_GXWX(map_, y);
+
+      if (!MAP_VALID(map_, mi_, mj_))
+        return false;
+
+      else
+      {
+        int occ_state;
+        double occ_dist;
+        occ_state = map_->cells[MAP_INDEX(map_,mi_,mj_)].occ_state;
+        occ_dist = map_->cells[MAP_INDEX(map_,mi_,mj_)].occ_dist;
+        if (occ_state != -1 || occ_dist < 0.15)
+            return false;
+      }
+    }
+  }
 
   double theta = P.v[2];
   double dtheta;
@@ -255,7 +257,6 @@ bool WakeUp::laserSimulate()
     fake_readings.push_back(range);
   }
   fake_readings_clust.push_back(fake_readings);
-  // ROS_INFO("simu_reading !!! size is %d", simu_readings_clust.size());
 
   return true;
 }
@@ -286,11 +287,7 @@ void WakeUp::grid_map_search()
     // clear tmp cluster poses
     cluster_poses_tmp.clear();
     loop_width_count++;
-    // bool if_first = true;
     // loop over each grid in one spiral
-
-    // vector<double> mean;    
-    // bool if_mean_init = false;
 
     for (int c_loop_count=1; c_loop_count<=loop_width_count*8; c_loop_count++)
     {
@@ -352,7 +349,8 @@ void WakeUp::grid_map_search()
           }
           marker_pub_.publish(points);
         }
-        double var = LikelihoodFieldModel(fake_readings_clust[0], cluster_poses_tmp);
+        double var;
+        var = LikelihoodFieldModel(fake_readings_clust[0], cluster_poses_tmp);
         cout << "fake reading varriance for current searching is :  " << var << "  !!!" << endl;
         if (var > score_threshold)
         {
@@ -455,11 +453,16 @@ void WakeUp::handleMapMessage(const nav_msgs::OccupancyGrid& msg)
 
 void WakeUp::SimuBeamModelConfig()
 {
-  private_nh_.param("laser_z_hit", z_hit, 0.95);
-  private_nh_.param("laser_z_rand", z_rand, 0.05);
+  private_nh_.param("laser_z_hit", z_hit, 0.5);
+  private_nh_.param("laser_z_rand", z_rand, 0.5);
   private_nh_.param("laser_sigma_hit", sigma_hit, 0.2);
-  private_nh_.param("laser_max_beams", max_beams, 30);
-  private_nh_.param("wakeup_score_threshold", score_threshold, 1.2);
+  private_nh_.param("laser_max_beams", max_beams, 48);
+  private_nh_.param("wakeup_score_threshold", score_threshold, 50.0);
+  private_nh_.param("laser_max_range", max_range, 2.0);
+  private_nh_.param("laser_min_range", min_range, 0.1);
+  private_nh_.param("if_debug", DEBUG, false);
+  private_nh_.param("if_visualize_laser", IFVISUALIZE_FAKE_LASER, true);
+  private_nh_.param("if_visualize_search", IFVISUALIZE_SEARCH, true);
 }
 
 double WakeUp::LikelihoodFieldModel(const vector<double> &fake_reading, const vector<pf_vector_t> &poses)
@@ -507,7 +510,10 @@ double WakeUp::LikelihoodFieldModel(const vector<double> &fake_reading, const ve
       obs_range = fake_reading[i];
 
       if (obs_range >= max_range)
+      {
+        one_cls_score.push_back(0.0);
         continue;
+      }
       
       pz = 0.0;
 
@@ -536,19 +542,23 @@ double WakeUp::LikelihoodFieldModel(const vector<double> &fake_reading, const ve
       p += pzc;
 
       // visualize fake readings
-      geometry_msgs::Point p;
-      p.x = MAP_WXGX(map_,mi);
-      p.y = MAP_WYGY(map_,mj);
-      p.z = 0.0;
-      points.points.push_back(p); 
+      geometry_msgs::Point pt;
+      pt.x = MAP_WXGX(map_,mi);
+      pt.y = MAP_WYGY(map_,mj);
+      pt.z = 0.0;
+      points.points.push_back(pt); 
 
       one_cls_score.push_back(pzc);
 
+      // cout << i << "th cluster pzc is: " << pzc << endl;
+
     }
+    assert(one_cls_score.size()==max_beams);
     total_score += p;
     clust_scores.push_back(one_cls_score);
-    cout << "p for cluster" << j << "is :" << p << endl;
-    
+    // print total score for each cluster pose
+    cout << "p for cluster" << j << "is :" << p << "reading size is" << fake_reading.size() << endl;
+
   }
 
   // calculate varriance of total score
@@ -560,29 +570,47 @@ double WakeUp::LikelihoodFieldModel(const vector<double> &fake_reading, const ve
   // }
    
   // calculte varriance of individual laser score
-  assert(clust_scores[0].size()==max_beams);
-  vector<double> m_;
-  m_.resize(max_beams, 0.0);
-  double var = 0.0;
-  int sz = clust_scores.size();
-  // each laser
-  for (int i=0; i<max_beams; i++)
-  {
-    for (int j=0; j<sz; j++) // each clust
-    {
-      m_[i] += clust_scores[j][i]/(double)sz;
-    }
+  // vector<double> m_;
+  // m_.resize(max_beams, 0.0);
+  // double var = 0.0;
+  // int sz = clust_scores.size();
+  // // each laser
+  // for (int i=0; i<max_beams; i++)
+  // {
+  //   for (int j=0; j<sz; j++) // each clust
+  //   {
+  //     m_[i] += clust_scores[j][i]/(double)sz;
+  //   }
 
-    for (int j=0; j<sz; j++)
-    {
-      var += pow(clust_scores[j][i]-m_[i], 2.0)/(double)sz;
-    }
-  }
+  //   for (int j=0; j<sz; j++)
+  //   {
+  //     var += pow(clust_scores[j][i]-m_[i], 2.0)/(double)sz;
+  //   }
+  // }
 
   if (IFVISUALIZE_FAKE_LASER)
     marker_pub.publish(points);
 
-  return var;
+  // cross entropy
+  vector<double> cetr;
+  cetr.resize(max_beams, 0.0);
+  double max_cetr;
+  double max_diff = 0.0;
+  for (int i=0; i<clust_scores.size(); i++)
+  {
+    for (int j=0; j<max_beams; j++)
+    {
+      double px, qx;
+      px = clust_scores[0][j];
+      qx = clust_scores[i][j];
+      cetr[i] += -px * log2(qx);
+    }
+    cout << "cetr for clst " << i << "is : " << cetr[i] << endl;
+    max_diff = max(cetr[i] - cetr[0], max_diff);
+  }
+  max_cetr = *max_element(cetr.begin(), cetr.end());
+
+  return max_cetr;
 }
 
 

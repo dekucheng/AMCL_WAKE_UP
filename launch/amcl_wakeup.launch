@@ -8,8 +8,8 @@
   <!-- AMCL -->
   <node pkg="amcl_wakeup" type="amcl_wakeup" name="amcl_wakeup" output="screen">
   
-    <param name="min_particles"             value="2500"/>
-    <param name="max_particles"             value="25000"/>
+    <param name="min_particles"             value="3500"/>
+    <param name="max_particles"             value="30000"/>
     <param name="kld_err"                   value="0.02"/>
     <param name="update_min_d"              value="0.20"/>
     <param name="update_min_a"              value="0.20"/>
@@ -23,12 +23,12 @@
     <param name="gui_publish_rate"          value="50.0"/>
 
     <remap from="scan"                      to="$(arg scan_topic)"/>
-    <param name="laser_max_range"           value="3.0"/>
+    <param name="laser_max_range"           value="2.0"/>
     <param name="laser_max_beams"           value="180"/>
-    <param name="laser_z_hit"               value="0.5"/>
+    <param name="laser_z_hit"               value="0.95"/>
     <param name="laser_z_short"             value="0.05"/>
     <param name="laser_z_max"               value="0.05"/>
-    <param name="laser_z_rand"              value="0.5"/>
+    <param name="laser_z_rand"              value="0.05"/>
     <param name="laser_sigma_hit"           value="0.2"/>
     <param name="laser_lambda_short"        value="0.1"/>
     <param name="laser_likelihood_max_dist" value="2.0"/>
@@ -42,9 +42,6 @@
     <param name="odom_frame_id"             value="odom"/>
     <param name="base_frame_id"             value="base_footprint"/>
     
-    <!-- WAKEUP -->
-    <param name="wakeup_score_threshold"    value="1.2"/>
-
 
   </node>
 </launch>
