@@ -29,13 +29,13 @@
 #include <boost/bind.hpp>
 #include <boost/thread/mutex.hpp>
 
-// Signal handling
+// Signal handling  
 #include <signal.h>
 
-#include "amcl/map/map.h"
-#include "amcl/pf/pf.h"
-#include "amcl/sensors/amcl_odom.h"
-#include "amcl/sensors/amcl_laser.h"
+#include "amcl_wakeup/map/map.h"
+#include "amcl_wakeup/pf/pf.h"
+#include "amcl_wakeup/sensors/amcl_odom.h"
+#include "amcl_wakeup/sensors/amcl_laser.h"
 #include "portable_utils.hpp"
 
 #include "ros/assert.h"
@@ -52,6 +52,8 @@
 #include "nav_msgs/GetMap.h"
 #include "nav_msgs/SetMap.h"
 #include "std_srvs/Empty.h"
+#include "amcl_wakeup/PoseWithWeight.h"
+#include "amcl_wakeup/PoseArrayWithWeight.h"
 
 // For transform support
 #include "tf2/LinearMath/Transform.h"
@@ -463,7 +465,7 @@ AmclNode::AmclNode() :
 
   pose_pub_ = nh_.advertise<geometry_msgs::PoseWithCovarianceStamped>("amcl_pose", 2, true);
   particlecloud_pub_ = nh_.advertise<geometry_msgs::PoseArray>("particlecloud", 2, true);
-  cluster_poses_pub_ = nh_.advertise<geometry_msgs::PoseArray>("cluster_poses", 2, true);
+  cluster_poses_pub_ = nh_.advertise<amcl_wakeup::PoseArrayWithWeight>("cluster_poses", 2, true);
   global_loc_srv_ = nh_.advertiseService("global_localization", 
 					 &AmclNode::globalLocalizationCallback,
                                          this);
@@ -1345,7 +1347,7 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
     int max_weight_hyp = -1;
     std::vector<amcl_hyp_t> hyps;
     hyps.resize(pf_->sets[pf_->current_set].cluster_count);
-    geometry_msgs::PoseArray cluster_poses;
+    amcl_wakeup::PoseArrayWithWeight cluster_poses;
     cluster_poses.header.stamp = ros::Time::now();
     cluster_poses.header.frame_id = global_frame_id_;
     cluster_poses.poses.resize(pf_->sets[pf_->current_set].cluster_count);
@@ -1365,11 +1367,12 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
       // publish cluster poses
       cluster_poses.poses[hyp_count].position.x = pose_mean.v[0];
       cluster_poses.poses[hyp_count].position.y = pose_mean.v[1];
-      cluster_poses.poses[hyp_count].position.z = 0;
+      cluster_poses.poses[hyp_count].position.z = 0.0;
+      cluster_poses.poses[hyp_count].weight = weight;
 
       tf2::Quaternion q;
       q.setRPY(0, 0, pose_mean.v[2]);
-      tf2::convert(q, cluster_poses.poses[hyp_count ].orientation);
+      tf2::convert(q, cluster_poses.poses[hyp_count].orientation);
 
       hyps[hyp_count].weight = weight;
       hyps[hyp_count].pf_pose_mean = pose_mean;

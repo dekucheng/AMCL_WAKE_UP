@@ -9,9 +9,10 @@
 #include "ros/ros.h"
 #include <signal.h>
 
-#include "amcl/map/map.h"
-#include "amcl/pf/pf_vector.h"
+#include "amcl_wakeup/map/map.h"
+#include "amcl_wakeup/pf/pf_vector.h"
 #include "portable_utils.hpp"
+#include "amcl_wakeup/motionmonitor/MotionMonitor.h"
 
 // Messages that I need
 #include "sensor_msgs/LaserScan.h"
@@ -21,8 +22,11 @@
 #include "nav_msgs/SetMap.h"
 #include "std_srvs/Empty.h"
 #include <visualization_msgs/Marker.h>
+#include "move_base_msgs/MoveBaseActionGoal.h"
+#include "actionlib_msgs/GoalStatusArray.h"
+#include "amcl_wakeup/PoseWithWeight.h"
+#include "amcl_wakeup/PoseArrayWithWeight.h"
 
-// #include "amcl_wakeup/Handleclusterpose.h"
 
 // For transform support
 #include "tf2/LinearMath/Transform.h"
@@ -34,6 +38,17 @@
 #include "tf2_ros/transform_broadcaster.h"
 #include "tf2_ros/transform_listener.h"
 #include "message_filters/subscriber.h"
+
+typedef struct
+{
+  pf_vector_t pose;
+
+  double weight;
+
+  int id;
+
+} pose_with_weight;
+
 
 using namespace std;
 
@@ -48,9 +63,10 @@ class WakeUp
 
     ros::NodeHandle nh_;
     ros::NodeHandle private_nh_;
-    ros::Subscriber cluster_pose_sub, amcl_pose_sub;
+    ros::Subscriber cluster_pose_sub, odom_sub, amcl_sub, move_base_goal_sub;
     ros::Publisher marker_pub;    
     ros::Publisher marker_pub_;
+    ros::Publisher goal_pub;
     mutex mutex_;
 
     int max_beams;
@@ -62,7 +78,6 @@ class WakeUp
     vector<pf_vector_t> cluster_poses;
     vector<pf_vector_t> cluster_poses_tmp;
     vector<vector<double>> fake_readings_clust;
-    double mean_cov_fake_readings;
 
     map_t* map_;
     bool map_converted;
@@ -71,41 +86,49 @@ class WakeUp
 
     bool IFVISUALIZE_FAKE_LASER;
     bool IFVISUALIZE_SEARCH;
+    bool IF_PRINT;
 
     void requestMap();
     void handleMapMessage(const nav_msgs::OccupancyGrid& msg);
     void freememory();
     map_t* convertMap(const nav_msgs::OccupancyGrid& map_msg);
-    void clusterPoseReceived(const geometry_msgs::PoseArrayPtr& msg);
+    void clusterPoseReceived(const amcl_wakeup::PoseArrayWithWeightConstPtr& msg);
     bool laserSimulate();
     // cluster callbacks
-    void handleClusterPose(const geometry_msgs::PoseArray& msg);
+    void handleClusterPose(const amcl_wakeup::PoseArrayWithWeight& msg);
     void calc_fake_readings_stats();
     void grid_map_search();
+    void updateAMCL(const geometry_msgs::PoseWithCovarianceStampedConstPtr& msg);
+    void checkmovestatus(const actionlib_msgs::GoalStatusArrayConstPtr& msg);
+    void relabel_clusters(vector<pose_with_weight>& PWW, vector<vector<pose_with_weight>>& PWW_labeled);
+    void dfs_label(vector<pose_with_weight>& PWW, pose_with_weight& pww, vector<pose_with_weight>& pww_labeled, int& clst_id);
 
     double z_hit, z_rand, sigma_hit;
     double score_threshold;
     void SimuBeamModelConfig();
     double LikelihoodFieldModel(const vector<double> &fake_reading, const vector<pf_vector_t> &poses);
-    geometry_msgs::Po
+
+    // communicate with move_base
+    MotionMonitor* mtmonitor;
+    move_base_msgs::MoveBaseActionGoal* current_goal;
+    int last_tracking_goal_id;
 };
 
 WakeUp::WakeUp() :
-      private_nh_("~")
+      private_nh_("~"),
+      current_goal(NULL),
+      last_tracking_goal_id(-1)
 {
     use_map_topic = false;
     laser_simu_req = true;
     map_converted = false;
-
     grid_size = 0.05;
-    search_width = 4.0; // meters
     max_occ_dist = 2.0;
 
     cluster_pose_sub = nh_.subscribe("cluster_poses", 2, &WakeUp::clusterPoseReceived, this);
-    amcl_pose_sub = nh_subscribe("amcl_pose", 2, &WakeUp::updategoalpose, this);
     marker_pub = nh_.advertise<visualization_msgs::Marker>("visualization_fakelaser_marker", 2);
     marker_pub_ = nh_.advertise<visualization_msgs::Marker>("visualization_search_marker", 2);    
-    
+    goal_pub = nh_.advertise<move_base_msgs::MoveBaseActionGoal>("move_base/goal", 2);
     if (!use_map_topic)
     {
         SimuBeamModelConfig();
@@ -114,22 +137,26 @@ WakeUp::WakeUp() :
 }
 WakeUp::~WakeUp()
 {
-    freememory();
+  freememory();
+  delete mtmonitor;
 }
 
-void WakeUp::clusterPoseReceived(const geometry_msgs::PoseArrayPtr& msg)
+void WakeUp::clusterPoseReceived(const amcl_wakeup::PoseArrayWithWeightConstPtr& msg)
 {
   if (laser_simu_req && map_converted)
     handleClusterPose(*msg);
-  ros::Duration(2.0).sleep();
 }
 
-void WakeUp::handleClusterPose(const geometry_msgs::PoseArray& msg)
+void WakeUp::handleClusterPose(const amcl_wakeup::PoseArrayWithWeight& msg)
 {
+  laser_simu_req = false;
   cluster_poses.clear();
+  vector<pose_with_weight> PWW;
   for (int i=0; i<msg.poses.size(); i++)
   {
-    pf_vector_t p;
+    if (msg.poses[i].weight < 0.0001)
+      continue;
+    pose_with_weight p;
     tf2::Quaternion q(
       msg.poses[i].orientation.x,
       msg.poses[i].orientation.y,
@@ -139,11 +166,48 @@ void WakeUp::handleClusterPose(const geometry_msgs::PoseArray& msg)
     tf2::Matrix3x3 m(q);
     double roll, pitch, yaw;
     m.getRPY(roll, pitch, yaw);
-    p.v[0] = msg.poses[i].position.x;
-    p.v[1] = msg.poses[i].position.y;
-    p.v[2] = yaw;
-    cluster_poses.push_back(p);
+    p.pose.v[0] = msg.poses[i].position.x;
+    p.pose.v[1] = msg.poses[i].position.y;
+    p.pose.v[2] = yaw;
+    p.weight = msg.poses[i].weight;
+    p.id = -1;
+    PWW.push_back(p);
   }
+  cout << PWW.size() << " clusters got from topic cluster_poses, ready to re-clustering" << endl;
+
+  // workspace
+  vector<vector<pose_with_weight>> PWW_labeled;
+  relabel_clusters(PWW, PWW_labeled);
+  
+  // size of PWW should equal to the number of clusters
+  for (int i=0; i<PWW_labeled.size(); i++)
+  {
+    vector<pose_with_weight>* pww;
+    pww = &PWW_labeled[i];
+    double weight = 0.0;
+    for (int j=0; j<pww->size(); j++)
+    {
+      weight += (*pww)[j].weight;
+
+    }
+
+    cout << "weight for each sub lab pww is " << weight << endl;
+
+
+    pf_vector_t cl_p;
+    cl_p.v[0] = cl_p.v[1] = cl_p.v[2] = 0.0;
+
+    for (int j=0; j<pww->size(); j++)
+    {
+      cl_p.v[0] += (*pww)[j].weight/weight * (*pww)[j].pose.v[0];
+      cl_p.v[1] += (*pww)[j].weight/weight * (*pww)[j].pose.v[1];
+      cl_p.v[2] += (*pww)[j].weight/weight * (*pww)[j].pose.v[2];
+      cout << "the cl_p is " << (*pww)[j].pose.v[0] << "    " << (*pww)[j].pose.v[1] << "     " << (*pww)[j].pose.v[2] << endl;
+    }
+
+    cluster_poses.push_back(cl_p);
+  }
+
   ROS_INFO("%d cluster poses got!!!", cluster_poses.size());
     // lock_guard<mutex> guard(mutex_);
   if (cluster_poses.size()==1)
@@ -160,6 +224,61 @@ void WakeUp::handleClusterPose(const geometry_msgs::PoseArray& msg)
       grid_map_search();
     // laser_simu_req = true;
   }
+}
+
+void WakeUp::relabel_clusters(vector<pose_with_weight>& PWW, vector<vector<pose_with_weight>>& PWW_labeled)
+{
+  int clst_id = 0;
+  for (int i=0; i<PWW.size(); i++)
+  {
+    vector<pose_with_weight> pww_labeled;
+    if(PWW[i].id>=0)
+      continue;
+    PWW[i].id = clst_id;
+    pww_labeled.push_back(PWW[i]);
+    dfs_label(PWW, PWW[i], pww_labeled, clst_id);
+    PWW_labeled.push_back(pww_labeled);
+    clst_id++;
+  }
+
+  ROS_ASSERT(PWW_labeled.size()==clst_id);
+}
+
+void WakeUp::dfs_label(vector<pose_with_weight>& PWW, pose_with_weight& pww, vector<pose_with_weight>& pww_labeled, int& clst_id)
+{
+  for (int i=0; i<PWW.size(); i++)
+  {
+    if (PWW[i].id >= 0)
+      continue;
+    double dist;
+    dist = sqrt(pow(abs(PWW[i].pose.v[0] - pww.pose.v[0])/MAP_SIZE_X, 2) + 
+                pow(abs(PWW[i].pose.v[1] - pww.pose.v[1])/MAP_SIZE_Y, 2) + 
+                pow(abs(PWW[i].pose.v[2] - pww.pose.v[2])/MAP_SIZE_Z, 2));
+    if (dist < 6)
+    {
+      PWW[i].id = clst_id;
+      pww_labeled.push_back(PWW[i]);
+      dfs_label(PWW, PWW[i], pww_labeled, clst_id);
+    }
+  }
+}
+
+
+void WakeUp::updateAMCL(const geometry_msgs::PoseWithCovarianceStampedConstPtr& msg)
+{
+  mutex_.lock();
+  mtmonitor->getAMCLupdate(*msg);
+  move_base_msgs::MoveBaseActionGoal* goal;
+  goal = mtmonitor->getCurrentGoal();
+  cout << "current goal id is: " << goal->header.seq << endl;
+  if (current_goal == NULL || current_goal->header.seq != goal->header.seq)
+  {
+    current_goal = goal;
+    goal_pub.publish(*current_goal);
+    ROS_INFO("new goal published!!!");
+  }
+
+  mutex_.unlock();
 }
 
 bool WakeUp::laserSimulate()
@@ -261,9 +380,31 @@ bool WakeUp::laserSimulate()
   return true;
 }
 
+void WakeUp::checkmovestatus(const actionlib_msgs::GoalStatusArrayConstPtr& msg)
+{
+  if (msg->status_list.empty())
+    return;
+  const actionlib_msgs::GoalStatus* gst;
+  int c_id;
+  c_id = msg->status_list.size()-1;
+  gst = &(msg->status_list[c_id]);
+  if (gst->goal_id.stamp.sec!= last_tracking_goal_id && gst->status == 3)
+  {
+    last_tracking_goal_id = gst->goal_id.stamp.sec;
+    ROS_INFO("current goal has been reached, deleting motionmonitor!");
+
+    amcl_sub.shutdown();
+    odom_sub.shutdown();
+    delete mtmonitor;
+    current_goal = NULL;
+    laser_simu_req = true;
+    ROS_INFO("hang off for amcl convergence!");
+    ros::Duration d(8.0);
+    d.sleep();
+  }
+}
 void WakeUp::grid_map_search()
 {
-  laser_simu_req = false;
   // cluster_poses_tmp = cluster_poses;
   if (cluster_poses.size()==0)
   {
@@ -351,10 +492,15 @@ void WakeUp::grid_map_search()
         }
         double var;
         var = LikelihoodFieldModel(fake_readings_clust[0], cluster_poses_tmp);
-        cout << "fake reading varriance for current searching is :  " << var << "  !!!" << endl;
+        if(IF_PRINT)
+          cout << "fake reading varriance for current searching is :  " << var << "  !!!" << endl;
         if (var > score_threshold)
         {
           ROS_INFO("Distinctive grids found!!! Check tmp poses for navigation, var is %f", var);
+          mtmonitor = new MotionMonitor(cluster_poses_tmp, cluster_poses);
+          odom_sub = nh_.subscribe("odom", 5, &MotionMonitor::getCurrentOdom, mtmonitor);
+          amcl_sub = nh_.subscribe("amcl_pose", 2, &WakeUp::updateAMCL, this);
+          move_base_goal_sub = nh_.subscribe("move_base/status", 2, &WakeUp::checkmovestatus, this);
           return;
         }
         // calc_fake_readings_stats();
@@ -385,37 +531,7 @@ void WakeUp::grid_map_search()
   ROS_INFO("SEARCHING FINISHED, no distinctive girds found!!!");
   return;
 }
-  
 
-
-void WakeUp::calc_fake_readings_stats()
-{
-  int i, j;
-  vector<double> mean_fake_readings;
-  vector<double> cov_fake_readings;
-  mean_fake_readings.resize(max_beams, 0.0);
-  // cov_fake_readings.resize(max_beams, 0);
-  double cov_accumulate = 0.0;
-  for (i=0; i<fake_readings_clust.size(); i++)
-  {
-    for (j=0; j<max_beams; j++)
-    {
-      mean_fake_readings[j] += 1.0/fake_readings_clust.size() * fake_readings_clust[i][j];
-    }
-  }
-  for (i=0; i<fake_readings_clust.size(); i++)
-  {
-    for (j=0; j<max_beams; j++)
-    {
-      cov_accumulate += 1.0/fake_readings_clust.size() 
-                        * pow(fake_readings_clust[i][j]-mean_fake_readings[j], 2);
-      // ROS_INFO("fake range for cluster %d is: %f", i, fake_readings_clust[i][j]);
-    }
-  }
-  mean_cov_fake_readings = cov_accumulate; 
-  ROS_INFO("the mean cov fake readings is %f ", mean_cov_fake_readings); 
-
-}
 
 void WakeUp::freememory()
 {
@@ -463,6 +579,8 @@ void WakeUp::SimuBeamModelConfig()
   private_nh_.param("if_debug", DEBUG, false);
   private_nh_.param("if_visualize_laser", IFVISUALIZE_FAKE_LASER, true);
   private_nh_.param("if_visualize_search", IFVISUALIZE_SEARCH, true);
+  private_nh_.param("if_print", IF_PRINT, true);
+  private_nh_.param("search_width", search_width, 4.0);
 }
 
 double WakeUp::LikelihoodFieldModel(const vector<double> &fake_reading, const vector<pf_vector_t> &poses)
@@ -557,8 +675,8 @@ double WakeUp::LikelihoodFieldModel(const vector<double> &fake_reading, const ve
     total_score += p;
     clust_scores.push_back(one_cls_score);
     // print total score for each cluster pose
-    cout << "p for cluster" << j << "is :" << p << "reading size is" << fake_reading.size() << endl;
-
+    if (IF_PRINT)
+      cout << "total score for cluster" << j << "is :" << p << "reading size is" << fake_reading.size() << endl;
   }
 
   // calculate varriance of total score
@@ -605,7 +723,8 @@ double WakeUp::LikelihoodFieldModel(const vector<double> &fake_reading, const ve
       qx = clust_scores[i][j];
       cetr[i] += -px * log2(qx);
     }
-    cout << "cetr for clst " << i << "is : " << cetr[i] << endl;
+    if (IF_PRINT)
+      cout << "average beam cross entropy for clst " << i << "is : " << cetr[i]/(double)max_beams << endl;
     max_diff = max(cetr[i] - cetr[0], max_diff);
   }
   max_cetr = *max_element(cetr.begin(), cetr.end());
@@ -646,7 +765,6 @@ void sigintHandler(int sig)
     ROS_INFO("Shutting Down ...");
     ros::shutdown();
 }
-
 
 
 int main(int argc, char** argv)

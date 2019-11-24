@@ -71,7 +71,7 @@ pf_kdtree_t *pf_kdtree_alloc(int max_size)
 
   self->size[0] = 0.50;
   self->size[1] = 0.50;
-  self->size[2] = (10 * M_PI / 180);
+  self->size[2] = (10 * M_PI / 180); // resolution for yaw is 10 degrees
 
   self->root = NULL;
 

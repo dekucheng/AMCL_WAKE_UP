@@ -196,14 +196,14 @@ bool AMCLOdom::UpdateAction(pf_t *pf, AMCLSensorData *data)
       // Sample pose differences
       delta_rot1_hat = angle_diff(delta_rot1,
                                   pf_ran_gaussian(this->alpha1*delta_rot1_noise*delta_rot1_noise +
-                                                  this->alpha2*delta_trans*delta_trans + 0.01));
+                                                  this->alpha2*delta_trans*delta_trans + 0.05));
       delta_trans_hat = delta_trans - 
               pf_ran_gaussian(this->alpha3*delta_trans*delta_trans +
                               this->alpha4*delta_rot1_noise*delta_rot1_noise +
-                              this->alpha4*delta_rot2_noise*delta_rot2_noise + 0.02);
+                              this->alpha4*delta_rot2_noise*delta_rot2_noise + 0.01);
       delta_rot2_hat = angle_diff(delta_rot2,
                                   pf_ran_gaussian(this->alpha1*delta_rot2_noise*delta_rot2_noise +
-                                                  this->alpha2*delta_trans*delta_trans + 0.01));
+                                                  this->alpha2*delta_trans*delta_trans + + 0.05));
 
       // Apply sampled update to particle pose
       sample->pose.v[0] += delta_trans_hat * 

@@ -24,15 +24,17 @@ find_package(catkin REQUIRED
 
 find_package(Boost REQUIRED)
 
-#add_service_files(
-#  FILES
-#  Handleclusterpose.srv
-#)
+add_message_files(
+  FILES
+  PoseWithWeight.msg
+  PoseArrayWithWeight.msg
+)
 
-#generate_messages(
-#  DEPENDENCIES
-#  geometry_msgs
-#)
+generate_messages(
+  DEPENDENCIES
+  geometry_msgs
+  std_msgs
+)
 
 # dynamic reconfigure
 generate_dynamic_reconfigure_options(
