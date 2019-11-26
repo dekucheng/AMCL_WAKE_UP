@@ -6,7 +6,7 @@
   <arg name="yaw"   default="3.1415"/>
 
   <include file="$(find gazebo_ros)/launch/empty_world.launch">
-    <arg name="world_name" value="$(find amcl_wakeup)/worlds/asym_longhallway.world"/>
+    <arg name="world_name" value="$(find amcl_wakeup)/worlds/asym_longhallway_2.world"/>
     <arg name="paused" value="false"/>
     <arg name="use_sim_time" value="true"/>
     <arg name="gui" value="true"/>

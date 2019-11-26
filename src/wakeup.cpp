@@ -399,7 +399,7 @@ void WakeUp::checkmovestatus(const actionlib_msgs::GoalStatusArrayConstPtr& msg)
     current_goal = NULL;
     laser_simu_req = true;
     ROS_INFO("hang off for amcl convergence!");
-    ros::Duration d(8.0);
+    ros::Duration d(15.0);
     d.sleep();
   }
 }
