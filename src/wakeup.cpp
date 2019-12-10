@@ -64,9 +64,8 @@ class WakeUp
     ros::NodeHandle nh_;
     ros::NodeHandle private_nh_;
     ros::Subscriber cluster_pose_sub, odom_sub, amcl_sub, move_base_goal_sub;
-    ros::Publisher marker_pub;    
-    ros::Publisher marker_pub_;
-    ros::Publisher goal_pub;
+    ros::Publisher marker_pub, marker_pub_, goal_pub, tracking_poses_pub, goal_visualize_pub;
+    ros::ServiceClient clear_costmaps;
     mutex mutex_;
 
     int max_beams;
@@ -87,6 +86,7 @@ class WakeUp
     bool IFVISUALIZE_FAKE_LASER;
     bool IFVISUALIZE_SEARCH;
     bool IF_PRINT;
+    double wait_time;
 
     void requestMap();
     void handleMapMessage(const nav_msgs::OccupancyGrid& msg);
@@ -112,6 +112,8 @@ class WakeUp
     MotionMonitor* mtmonitor;
     move_base_msgs::MoveBaseActionGoal* current_goal;
     int last_tracking_goal_id;
+    int check_clust_num;
+    bool CHECK_CLUST_NUM_CHANGE;
 };
 
 WakeUp::WakeUp() :
@@ -124,11 +126,17 @@ WakeUp::WakeUp() :
     map_converted = false;
     grid_size = 0.05;
     max_occ_dist = 2.0;
+    check_clust_num = -1;
+    CHECK_CLUST_NUM_CHANGE = false;
 
-    cluster_pose_sub = nh_.subscribe("cluster_poses", 2, &WakeUp::clusterPoseReceived, this);
+    cluster_pose_sub = nh_.subscribe("cluster_poses", 5, &WakeUp::clusterPoseReceived, this);
     marker_pub = nh_.advertise<visualization_msgs::Marker>("visualization_fakelaser_marker", 2);
     marker_pub_ = nh_.advertise<visualization_msgs::Marker>("visualization_search_marker", 2);    
     goal_pub = nh_.advertise<move_base_msgs::MoveBaseActionGoal>("move_base/goal", 2);
+    tracking_poses_pub = nh_.advertise<visualization_msgs::Marker>("visualization_tracking_poses", 10);
+    goal_visualize_pub = nh_.advertise<visualization_msgs::Marker>("visualization_goal", 2);
+    clear_costmaps = nh_.serviceClient<std_srvs::Empty>("move_base/clear_costmaps");
+
     if (!use_map_topic)
     {
         SimuBeamModelConfig();
@@ -154,7 +162,8 @@ void WakeUp::handleClusterPose(const amcl_wakeup::PoseArrayWithWeight& msg)
   vector<pose_with_weight> PWW;
   for (int i=0; i<msg.poses.size(); i++)
   {
-    if (msg.poses[i].weight < 0.0001)
+    // drop out clusters with low confidence
+    if (msg.poses[i].weight < 0.001)
       continue;
     pose_with_weight p;
     tf2::Quaternion q(
@@ -211,14 +220,18 @@ void WakeUp::handleClusterPose(const amcl_wakeup::PoseArrayWithWeight& msg)
   ROS_INFO("%d cluster poses got!!!", cluster_poses.size());
     // lock_guard<mutex> guard(mutex_);
   if (cluster_poses.size()==1)
+  {
     ROS_INFO("amcl pose converges, no need to do grid map searching!");
+    laser_simu_req = true;
+  }
   else
   {
     // keep updating current searching grid poses
     if (DEBUG)
       {
         ROS_INFO("Starting DEBUG MODE!!!");
-        double cross_entropy = LikelihoodFieldModel(fake_readings_clust[0], cluster_poses);
+        if (laserSimulate());
+          double L2 = LikelihoodFieldModel(fake_readings_clust[0], cluster_poses);
       }
     else
       grid_map_search();
@@ -263,7 +276,7 @@ void WakeUp::dfs_label(vector<pose_with_weight>& PWW, pose_with_weight& pww, vec
   }
 }
 
-
+// when new amcl_pose estimate comes in
 void WakeUp::updateAMCL(const geometry_msgs::PoseWithCovarianceStampedConstPtr& msg)
 {
   mutex_.lock();
@@ -271,12 +284,66 @@ void WakeUp::updateAMCL(const geometry_msgs::PoseWithCovarianceStampedConstPtr& 
   move_base_msgs::MoveBaseActionGoal* goal;
   goal = mtmonitor->getCurrentGoal();
   cout << "current goal id is: " << goal->header.seq << endl;
+
   if (current_goal == NULL || current_goal->header.seq != goal->header.seq)
   {
+    // clear cost maps to navigate
+    std_srvs::Empty emp;
+    clear_costmaps.call(emp);
     current_goal = goal;
     goal_pub.publish(*current_goal);
     ROS_INFO("new goal published!!!");
+
+    // visualize the published goal
+    visualization_msgs::Marker goal_marker;
+    goal_marker.header.frame_id = "map";
+    goal_marker.ns = "current_goal";
+    goal_marker.header.stamp = ros::Time::now();
+    goal_marker.action = visualization_msgs::Marker::ADD;
+    goal_marker.pose.orientation.w = 1.0;
+    goal_marker.id = 0;
+    goal_marker.type = visualization_msgs::Marker::CUBE;
+    goal_marker.scale.x = 0.3;
+    goal_marker.scale.y = 0.3;
+    goal_marker.scale.z = 0.01;
+
+    // Points are green
+    goal_marker.color.r = 1.0f;
+    goal_marker.color.a = 1.0;
+    goal_marker.pose.position.x = current_goal->goal.target_pose.pose.position.x;
+    goal_marker.pose.position.y = current_goal->goal.target_pose.pose.position.y;
+    goal_marker.pose.position.z = 0.0;
+    goal_visualize_pub.publish(goal_marker);
   }
+
+  vector<pf_vector_t> tracking_poses;
+  mtmonitor->getTrackingPoses(tracking_poses);
+
+  visualization_msgs::Marker points;
+  points.header.frame_id = "map";
+  points.ns = "tracking_poses";
+  points.header.stamp = ros::Time::now();
+  points.action = visualization_msgs::Marker::ADD;
+  points.pose.orientation.w = 1.0;
+  points.id = 0;
+  points.type = visualization_msgs::Marker::POINTS;
+  points.scale.x = 0.1;
+  points.scale.y = 0.1;
+
+  // Points are green
+  points.color.r = 1.0f;
+  points.color.b = 0.75;
+  points.color.a = 1.0;
+
+  for(int i=0; i<tracking_poses.size(); i++)
+  {
+    geometry_msgs::Point p;
+    p.x = tracking_poses[i].v[0];
+    p.y = tracking_poses[i].v[1];
+    p.z = 0.0;
+    points.points.push_back(p); 
+  }
+  tracking_poses_pub.publish(points);
 
   mutex_.unlock();
 }
@@ -311,7 +378,7 @@ bool WakeUp::laserSimulate()
         double occ_dist;
         occ_state = map_->cells[MAP_INDEX(map_,mi_,mj_)].occ_state;
         occ_dist = map_->cells[MAP_INDEX(map_,mi_,mj_)].occ_dist;
-        if (occ_state != -1 || occ_dist < 0.15)
+        if (occ_state != -1 || occ_dist < 0.20)
             return false;
       }
     }
@@ -399,10 +466,11 @@ void WakeUp::checkmovestatus(const actionlib_msgs::GoalStatusArrayConstPtr& msg)
     current_goal = NULL;
     laser_simu_req = true;
     ROS_INFO("hang off for amcl convergence!");
-    ros::Duration d(15.0);
+    ros::Duration d(wait_time);
     d.sleep();
   }
 }
+
 void WakeUp::grid_map_search()
 {
   // cluster_poses_tmp = cluster_poses;
@@ -490,15 +558,15 @@ void WakeUp::grid_map_search()
           }
           marker_pub_.publish(points);
         }
-        double var;
-        var = LikelihoodFieldModel(fake_readings_clust[0], cluster_poses_tmp);
+        double L2;
+        L2 = LikelihoodFieldModel(fake_readings_clust[0], cluster_poses_tmp);
         if(IF_PRINT)
-          cout << "fake reading varriance for current searching is :  " << var << "  !!!" << endl;
-        if (var > score_threshold)
+          cout << "fake reading L2 distance for current searching is :  " << L2 << "  !!!" << endl;
+        if (L2 > score_threshold)
         {
-          ROS_INFO("Distinctive grids found!!! Check tmp poses for navigation, var is %f", var);
+          ROS_INFO("Distinctive grids found!!! Check tmp poses for navigation, L2 is %f", L2);
           mtmonitor = new MotionMonitor(cluster_poses_tmp, cluster_poses);
-          odom_sub = nh_.subscribe("odom", 5, &MotionMonitor::getCurrentOdom, mtmonitor);
+          odom_sub = nh_.subscribe("odom", 10, &MotionMonitor::getCurrentOdom, mtmonitor);
           amcl_sub = nh_.subscribe("amcl_pose", 2, &WakeUp::updateAMCL, this);
           move_base_goal_sub = nh_.subscribe("move_base/status", 2, &WakeUp::checkmovestatus, this);
           return;
@@ -581,6 +649,7 @@ void WakeUp::SimuBeamModelConfig()
   private_nh_.param("if_visualize_search", IFVISUALIZE_SEARCH, true);
   private_nh_.param("if_print", IF_PRINT, true);
   private_nh_.param("search_width", search_width, 4.0);
+  private_nh_.param("wait_time", wait_time, 10.0);
 }
 
 double WakeUp::LikelihoodFieldModel(const vector<double> &fake_reading, const vector<pf_vector_t> &poses)
@@ -679,7 +748,21 @@ double WakeUp::LikelihoodFieldModel(const vector<double> &fake_reading, const ve
       cout << "total score for cluster" << j << "is :" << p << "reading size is" << fake_reading.size() << endl;
   }
 
-  // calculate varriance of total score
+  // calculate L2 distance of total score
+  ROS_ASSERT(clust_scores.size()>1);
+  double max_L2;
+  for (int i=1; i<clust_scores.size(); i++)
+  {
+    double L2 = 0.0;
+    for (int j=0; j<max_beams; j++)
+    {
+      double truth = clust_scores[0][j];          // which is the score of fake readings
+      L2 += pow(truth-clust_scores[i][j], 2);
+    }
+    L2 = sqrt(L2);
+    max_L2 = max(max_L2, L2);
+  }
+
   // double mean = total_score/(double)poses.size();
   // double var=0.0;
   // for (int i=0; i<clust_scores.size(); i++)
@@ -687,7 +770,6 @@ double WakeUp::LikelihoodFieldModel(const vector<double> &fake_reading, const ve
   //   var += 1/(double)clust_scores.size() * pow((clust_scores[i]-mean), 2);
   // }
    
-  // calculte varriance of individual laser score
   // vector<double> m_;
   // m_.resize(max_beams, 0.0);
   // double var = 0.0;
@@ -710,26 +792,26 @@ double WakeUp::LikelihoodFieldModel(const vector<double> &fake_reading, const ve
     marker_pub.publish(points);
 
   // cross entropy
-  vector<double> cetr;
-  cetr.resize(max_beams, 0.0);
-  double max_cetr;
-  double max_diff = 0.0;
-  for (int i=0; i<clust_scores.size(); i++)
-  {
-    for (int j=0; j<max_beams; j++)
-    {
-      double px, qx;
-      px = clust_scores[0][j];
-      qx = clust_scores[i][j];
-      cetr[i] += -px * log2(qx);
-    }
-    if (IF_PRINT)
-      cout << "average beam cross entropy for clst " << i << "is : " << cetr[i]/(double)max_beams << endl;
-    max_diff = max(cetr[i] - cetr[0], max_diff);
-  }
-  max_cetr = *max_element(cetr.begin(), cetr.end());
+  // vector<double> cetr;
+  // cetr.resize(max_beams, 0.0);
+  // double max_cetr;
+  // double max_diff = 0.0;
+  // for (int i=0; i<clust_scores.size(); i++)
+  // {
+  //   for (int j=0; j<max_beams; j++)
+  //   {
+  //     double px, qx;
+  //     px = clust_scores[0][j];
+  //     qx = clust_scores[i][j];
+  //     cetr[i] += -px * log2(qx);
+  //   }
+  //   if (IF_PRINT)
+  //     cout << "average beam cross entropy for clst " << i << "is : " << cetr[i]/(double)max_beams << endl;
+  //   max_diff = max(cetr[i] - cetr[0], max_diff);
+  // }
+  // max_cetr = *max_element(cetr.begin(), cetr.end());
 
-  return max_cetr;
+  return max_L2/(double)max_beams;
 }
 
 

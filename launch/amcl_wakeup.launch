@@ -8,8 +8,8 @@
   <!-- AMCL -->
   <node pkg="amcl_wakeup" type="amcl_wakeup" name="amcl_wakeup" output="screen">
   
-    <param name="min_particles"             value="3500"/>
-    <param name="max_particles"             value="30000"/>
+    <param name="min_particles"             value="5500"/>
+    <param name="max_particles"             value="45000"/>
     <param name="kld_err"                   value="0.02"/>
     <param name="update_min_d"              value="0.20"/>
     <param name="update_min_a"              value="0.20"/>
@@ -24,7 +24,7 @@
 
     <remap from="scan"                      to="$(arg scan_topic)"/>
     <param name="laser_max_range"           value="1.5"/>
-    <param name="laser_max_beams"           value="72"/>
+    <param name="laser_max_beams"           value="48"/>
     <param name="laser_z_hit"               value="0.95"/>
     <param name="laser_z_short"             value="0.05"/>
     <param name="laser_z_max"               value="0.05"/>

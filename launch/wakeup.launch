@@ -4,14 +4,15 @@
   <node pkg="amcl_wakeup" type="wakeup" name="wakeup" output="screen">
 
     <param name="laser_max_range"           value="1.5"/>
-    <param name="laser_max_beams"           value="72"/>
+    <param name="laser_max_beams"           value="48"/>
     <param name="laser_z_hit"               value="0.95"/>
     <param name="laser_z_rand"              value="0.05"/>
     <param name="laser_sigma_hit"           value="0.2"/>
     <param name="laser_model_type"          value="likelihood_field"/>
     <param name="if_debug"                  value="false"/>
-    <param name="wakeup_score_threshold"    value="150.0"/>
+    <param name="wakeup_score_threshold"    value="0.080"/>
     <param name="if_print"                  value="false"/>
-    <param name="search_width" 	 	    value="7.0"/>
+    <param name="search_width" 	 	    value="12.0"/>
+    <param name="wait_time"   	    	    value="4.0"/>
   </node>
 </launch>

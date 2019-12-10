@@ -98,7 +98,8 @@ add_executable(amcl_wakeup
                        src/amcl_node.cpp)
 
 add_executable(wakeup
-		       src/wakeup.cpp)
+		       src/wakeup.cpp
+		       src/amcl_wakeup/motionmonitor/MotionMonitor.cpp)
 
 add_dependencies(wakeup ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
