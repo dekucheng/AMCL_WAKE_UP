@@ -64,7 +64,7 @@ To recover from such wake-up failure, the robot is going to generate a new poten
   <img src = "files/Fig4b.png" height = "300px">
 </p>
 <p align="center">
-  <b>Fig 4(b). After taking the same control, state cluster **x<sub>2</sub>** is dropped out, but the other two still exist</b><br>
+  <b>Fig 4(b). After taking the same control, state cluster x<sub>2</sub> is dropped out, but the other two still exist</b><br>
 </p>
 
 To eliminate the remaining potentialty, the robot will just do the same step as above again to find a new control, which will make two potential states to have different simulated sensor readings. Again, after taking that control, the AMCL will converge to state **x<sub>1</sub>** , which is the true state of the robot.
@@ -80,7 +80,7 @@ To eliminate the remaining potentialty, the robot will just do the same step as 
   <img src = "files/Fig5b.png" height = "300px">
 </p>
 <p align="center">
-  <b>Fig 5(b). After taking the same control, AMCL finally converge to true state **x<sub>1</sub>**</b><br>
+  <b>Fig 5(b). After taking the same control, AMCL finally converge to true state x<sub>1</sub></b><br>
 </p>
 
 ## Grid Map Searching
@@ -91,8 +91,8 @@ As implied above, we have to find the **control** which can take the old state c
 </p>
 
 <p align="center">
-  <b>&#160 &#160 &#160 &#160 &#160 &#160 &#160 &#160  (a) potential state **x<sub>1</sub>** with its searching grids and order &#160 &#160  (b) potential state **x<sub>2</sub>** with its searching grids and order </b><br>
-  <b>Fig 6. After taking the same control, AMCL finally converge to true state **x<sub>1</sub>**</b><br>
+  <b>&#160 &#160 &#160 &#160 &#160 &#160 &#160 &#160  (a) potential state x<sub>1</sub> with its searching grids and order &#160 &#160  (b) potential state x<sub>2</sub> with its searching grids and order </b><br>
+  <b>Fig 6. After taking the same control, AMCL finally converge to true state x<sub>1</sub></b><br>
 </p>
 
 As shown in Fig 6, we use two potential states **x<sub>1</sub>** and **x<sub>3</sub>** as examples from the previous case. For the first searched grids pair (two grids marked with index 1), each one's relative transformation to its corresponding potential state is the same as another one's. The searching processes in a **inflating spiral** order with its center at each potential state.
