@@ -91,7 +91,7 @@ As implied above, we have to find the **control** which can take the old state c
 </p>
 
 <p align="center">
-  <b>&#160 &#160 &#160 &#160 &#160 &#160 &#160 &#160  (a) potential state x<sub>1</sub> with its searching grids and order &#160 &#160  (b) potential state x<sub>2</sub> with its searching grids and order </b><br>
+  <b> &#160 &#160 &#160 &#160 &#160  (a) potential state x<sub>1</sub> with its searching grids and order &#160  (b) potential state x<sub>2</sub> with its searching grids and order </b><br>
   <b>Fig 6. After taking the same control, AMCL finally converge to true state x<sub>1</sub></b><br>
 </p>
 
