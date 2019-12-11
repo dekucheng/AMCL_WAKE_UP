@@ -21,7 +21,7 @@ and then load the map file:
 >$ roslaunch amcl_wakeup turtlebot3_navigation.launch map_file:=/home/zhicheng/turtlebot3ws/src/amcl_wakeup/maps/map_asym_longhallway_2.yaml
 
 Otherwise if you run this package in **real world**, just run:
-> roslaunch amcl_wakeup turtlebot3_navigation.launch map_file:=$PATH_TO_YOUR_MAP
+>$ roslaunch amcl_wakeup turtlebot3_navigation.launch map_file:=$PATH_TO_YOUR_MAP
 
 Now a customized AMCL should be running (no difference from the raw AMCL package except that **amcl_wakeup** node publishes some topics necessary for this project).
 
