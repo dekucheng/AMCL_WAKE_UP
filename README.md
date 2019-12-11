@@ -1,6 +1,8 @@
 # AMCL wake-up self-recovery
 ## Video Demo
-See the demo in [Youtube]()
+(Recommended) See the demo running in simulation with dynamic obstacle [here](https://youtu.be/sMLQHKnkByA). You may want to skip the first 60 seconds, which is just global initialization.
+
+See the demo running in real world [here](https://youtu.be/afoSvsJPn9E).
 
 ## Set Up
 * Ubuntu 18.04

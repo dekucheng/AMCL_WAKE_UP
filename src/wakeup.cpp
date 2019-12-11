@@ -343,7 +343,7 @@ void WakeUp::updateAMCL(const geometry_msgs::PoseWithCovarianceStampedConstPtr& 
     p.z = 0.0;
     points.points.push_back(p); 
   }
-  tracking_poses_pub.publish(points);
+  // tracking_poses_pub.publish(points);
 
   mutex_.unlock();
 }
