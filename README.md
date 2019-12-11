@@ -13,6 +13,26 @@ See the demo running in real world [here](https://youtu.be/afoSvsJPn9E).
 ## Dependency
 * ROS-melodic-move-base
 
+## Run the package
+If you want to run it in **simulation**, you may need get gazebo installed and run:
+>$ roslaunch amcl_wakeup world_amcl_wakeup.launch
+
+and then load the map file:
+>$ roslaunch amcl_wakeup turtlebot3_navigation.launch map_file:=/home/zhicheng/turtlebot3ws/src/amcl_wakeup/maps/map_asym_longhallway_2.yaml
+
+Otherwise if you run this package in **real world**, just run:
+> roslaunch amcl_wakeup turtlebot3_navigation.launch map_file:=$PATH_TO_YOUR_MAP
+
+Now a customized AMCL should be running (no difference from the raw AMCL package except that **amcl_wakeup** node publishes some topics necessary for this project).
+
+To do global initialization, just call AMCL built in service:
+>$ rosservice call /global_localization "{}"
+
+If you get multiple uncertain state clusters, now it's the time to wake up the robot!
+
+>$ roslaunch amcl_wakeup wakeup.launch
+
+
 ## Project Objective
 This project focuses on solving **robot wake up problem** of AMCL. To be specific, it aims at helping AMCL self-recover from several potential initial states guesses just based on given map and laser scan sensor.
 
