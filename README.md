@@ -15,6 +15,7 @@ See the demo running in real world [here](https://youtu.be/afoSvsJPn9E).
 * Gazebo Plugin (optional)
 
 ## Table of Contents
+- [0. Build Gazebo Plugin (optional)](#Build-Gazebo-Plugin)
 - [1. Run the package](#Run-the-package)
 - [2. Project Objective](#Project-Objective)
 - [3. Project Pipeline](#Project-Pipeline)
@@ -23,7 +24,20 @@ See the demo running in real world [here](https://youtu.be/afoSvsJPn9E).
   * [Grid Map Searching](#Grid-Map-Searching)
   * [Experimental Results](#Experimental-Results)
   * [Drawbacks](#Drawbacks)
+- [6. Acknowledgement](#Acknowledgement)
 
+## Build Gazebo Plugin
+I modified the [gazebo_animatedbox_tutorial](http://gazebosim.org/tutorials?tut=animated_box) package to simulate dynamic obstacles. You can change the source code in **animated_box.cc** to generate customized obstacles. To build the package:
+```
+$ cd gazebo_animatedbox_tutorial/
+$ mkdir build
+$ cd build && cmake .. && make
+```
+Then add your CURRENT_PATH under the **build** directory to your $GAZEBO_PLUGIN_PATH in your **.bashrc**:
+```
+export GAZEBO_PLUGIN_PATH=CURRENT_PATH:$GAZEBO_PLUGIN_PATH
+```
+Then such plugin can be used in simulation.
 
 ## Run the package
 If you want to run it in **simulation**, you may need get gazebo installed and run:
@@ -142,6 +156,18 @@ As shown in Fig 6, we use two potential states **x<sub>1</sub>** and **x<sub>3</
 
 In each searching iteration, a new potential states set is generated. We pick one state from the new potential potential states set and generate its fake sensor reading **z<sub>fake** based on the given map **m**. Then for each potential state in the current searching potential states set we calculate the score **p(z<sub>fake</sub> | map, x<sub>i</sub>)** for all potential state **x<sub>i**. To figure out if there exists a big difference among them, we calculate the maximum L2 distance. If the maximum L2 distance **D<sub>L2</sub> > ε**, where **ε** is a preset threshold, the searching terminates and the robot will navigate to that state.
 
+The implementation of such idea looks like this with a little difference:
+
+<p align = "center">
+  <img src = "files/grid_map_searching.gif" height = "350px">
+</p>
+
+<p align="center">
+  <b>Fig 7. Grid Map Searcing </b><br>
+</p>
+
+
+
 ### Experimental Results
 Since this method only cares about static map, it’s not hard to capture the potential states set with ‘featured states’ in static environment. Once the ‘featured states’ are captured, AMCL always converges well when the robot gets there, as can be observed in the video. The speed of convergence depends on the threshold **ε**. How to set **ε** should depend on the task (e.g. the further we allow the robot to move, the larger **ε** can be set, because when the grid map searching gets further, it has larger probability to capture the featured states
 with big difference).
@@ -155,3 +181,14 @@ So far there are two drawbacks in this proposal:
 2. It is not suitable for the scenario where robots have limitations on movements after being boot up.
 
 3. Since the global initialization is required, the number of initial particles needs to be quite large to capture all potential states, otherwise the true state may be lost. This results in a slow convergence at the beginning, thus this method is not suitable for the scenario where the robot has to locate itself quickly after boot up.
+
+## Acknowledgement
+This is a final project done by Zhicheng Yu during his final quarter in MSR (Master of Science in Robotics) program at Northwestern University. It is supervised by Prof. Ying Wu and Prof. Matthew Elwin, who gave many valuable intuitions and considerations on this project.
+
+Also, it will be helpful to look up to raw AMCL ROS repo and AMCL papers:
+
+1.[amcl-ROS Wiki](http://wiki.ros.org/amcl)
+
+2.[Monte Carlo Localization: Efficient Position Estimation for Mobile Robots](http://robots.stanford.edu/papers/fox.aaai99.pdf)
+
+3.[KLD-Sampling: Adaptive Particle Filters](https://papers.nips.cc/paper/1998-kld-sampling-adaptive-particle-filters.pdf)
