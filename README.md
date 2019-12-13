@@ -16,10 +16,13 @@ See the demo running in real world [here](https://youtu.be/afoSvsJPn9E).
 
 ## Table of Contents
 - [1. Run the package](#Run-the-package)
-- [2. Project Objective](##Project-Objective)
-- [3. Project Pipeline](##Project-Pipeline)
-- [4. Background](##Background)
-
+- [2. Project Objective](#Project-Objective)
+- [3. Project Pipeline](#Project-Pipeline)
+- [4. Background](#Background)
+- [5. Method](#Method)
+  * [Grid Map Searching](#Grid-Map-Searching)
+  * [Experimental Results](#Experimental-Results)
+  * [Drawbacks](#Drawbacks)
 
 
 ## Run the package
