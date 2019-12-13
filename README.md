@@ -12,25 +12,43 @@ See the demo running in real world [here](https://youtu.be/afoSvsJPn9E).
 
 ## Dependency
 * ROS-melodic-move-base
+* Gazebo Plugin (optional)
+
+## Table of Contents
+- [1. Run the package](#Run-the-package)
+- [2. Project Objective](##Project-Objective)
+- [3. Project Pipeline](##Project-Pipeline)
+- [4. Background](##Background)
+
+
 
 ## Run the package
 If you want to run it in **simulation**, you may need get gazebo installed and run:
->$ roslaunch amcl_wakeup world_amcl_wakeup.launch
+```
+$ roslaunch amcl_wakeup world_amcl_wakeup.launch
+```
 
 and then load the map file:
->$ roslaunch amcl_wakeup turtlebot3_navigation.launch map_file:=/home/zhicheng/turtlebot3ws/src/amcl_wakeup/maps/map_asym_longhallway_2.yaml
+```
+$ roslaunch amcl_wakeup turtlebot3_navigation.launch map_file:=/home/zhicheng/turtlebot3ws/src/amcl_wakeup/maps/map_asym_longhallway_2.yaml
+```
 
 Otherwise if you run this package in **real world**, just run:
->$ roslaunch amcl_wakeup turtlebot3_navigation.launch map_file:=$PATH_TO_YOUR_MAP
+```
+$ roslaunch amcl_wakeup turtlebot3_navigation.launch map_file:=$PATH_TO_YOUR_MAP
+```
 
 Now a customized AMCL should be running (no difference from the raw AMCL package except that **amcl_wakeup** node publishes some topics necessary for this project).
 
 To do global initialization, just call AMCL built in service:
->$ rosservice call /global_localization "{}"
+```
+$ rosservice call /global_localization "{}"
+```
 
 If you get multiple uncertain state clusters, now it's the time to wake up the robot!
-
->$ roslaunch amcl_wakeup wakeup.launch
+```
+$ roslaunch amcl_wakeup wakeup.launch
+```
 
 
 ## Project Objective
@@ -105,7 +123,7 @@ To eliminate the remaining potentialty, the robot will just do the same step as 
   <b>Fig 5(b). After taking the same control, AMCL finally converge to true state x<sub>1</sub></b><br>
 </p>
 
-## Grid Map Searching
+### Grid Map Searching
 As implied above, we have to find the **control** which can take the old state cluster set to a new one which consists of states where the lidar sensor can get different readings. Actually we don't necessarily need to find out the **control**, instead it will be much easier to find the new potential states set with that feature. To do this, for the current potential states set, we can do **grid map searching** to figure this out.
 
 <p align = "center">
@@ -121,13 +139,13 @@ As shown in Fig 6, we use two potential states **x<sub>1</sub>** and **x<sub>3</
 
 In each searching iteration, a new potential states set is generated. We pick one state from the new potential potential states set and generate its fake sensor reading **z<sub>fake** based on the given map **m**. Then for each potential state in the current searching potential states set we calculate the score **p(z<sub>fake</sub> | map, x<sub>i</sub>)** for all potential state **x<sub>i**. To figure out if there exists a big difference among them, we calculate the maximum L2 distance. If the maximum L2 distance **D<sub>L2</sub> > ε**, where **ε** is a preset threshold, the searching terminates and the robot will navigate to that state.
 
-## Experimental Results
+### Experimental Results
 Since this method only cares about static map, it’s not hard to capture the potential states set with ‘featured states’ in static environment. Once the ‘featured states’ are captured, AMCL always converges well when the robot gets there, as can be observed in the video. The speed of convergence depends on the threshold **ε**. How to set **ε** should depend on the task (e.g. the further we allow the robot to move, the larger **ε** can be set, because when the grid map searching gets further, it has larger probability to capture the featured states
 with big difference).
 
 Also since we only do ray casting once in each iteration, the computation complexity is not that large. It should be fine to run this package on-chip only if the remote PC is relatively powerful.
 
-## Drawbacks
+### Drawbacks
 So far there are two drawbacks in this proposal:
 1. It won’t work in **a completely central symmetric map**. (results from the critical drawback of AMCL itself)
 
