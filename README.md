@@ -87,7 +87,7 @@ the situation that the robot is carried to an arbitrary location and the robot h
 state without any prior knowledge. This problem is also a common case when a robot is boot
 up without setting its initial state. A failure of this problem may raise up when the map has
 multiple duplicate or symmetric structures, in which case AMCL may result in multiple
-potential state hypotheses, as shown in **Fig 3**.
+potential state hypotheses, as shown in Fig 2.
 
 <p align = "center">
   <img src = "files/Fig2.png" height = "240px">
