@@ -267,7 +267,7 @@ void WakeUp::dfs_label(vector<pose_with_weight>& PWW, pose_with_weight& pww, vec
     dist = sqrt(pow(abs(PWW[i].pose.v[0] - pww.pose.v[0])/MAP_SIZE_X, 2) + 
                 pow(abs(PWW[i].pose.v[1] - pww.pose.v[1])/MAP_SIZE_Y, 2) + 
                 pow(abs(PWW[i].pose.v[2] - pww.pose.v[2])/MAP_SIZE_Z, 2));
-    if (dist < 6)
+    if (dist < 3)
     {
       PWW[i].id = clst_id;
       pww_labeled.push_back(PWW[i]);
@@ -790,26 +790,6 @@ double WakeUp::LikelihoodFieldModel(const vector<double> &fake_reading, const ve
 
   if (IFVISUALIZE_FAKE_LASER)
     marker_pub.publish(points);
-
-  // cross entropy
-  // vector<double> cetr;
-  // cetr.resize(max_beams, 0.0);
-  // double max_cetr;
-  // double max_diff = 0.0;
-  // for (int i=0; i<clust_scores.size(); i++)
-  // {
-  //   for (int j=0; j<max_beams; j++)
-  //   {
-  //     double px, qx;
-  //     px = clust_scores[0][j];
-  //     qx = clust_scores[i][j];
-  //     cetr[i] += -px * log2(qx);
-  //   }
-  //   if (IF_PRINT)
-  //     cout << "average beam cross entropy for clst " << i << "is : " << cetr[i]/(double)max_beams << endl;
-  //   max_diff = max(cetr[i] - cetr[0], max_diff);
-  // }
-  // max_cetr = *max_element(cetr.begin(), cetr.end());
 
   return max_L2/(double)max_beams;
 }

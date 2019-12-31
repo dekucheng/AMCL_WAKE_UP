@@ -1386,6 +1386,9 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
     }
     cluster_poses_pub_.publish(cluster_poses);
 
+    // print out the number of samples
+    // std::cout << "current particle number is :  " << pf_->sets[pf_->current_set].sample_count << std::endl;
+
     if(max_weight > 0.0)
     {
       ROS_DEBUG("Max weight pose: %.3f %.3f %.3f",
