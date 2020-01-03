@@ -40,6 +40,32 @@ typedef struct
   double v[3];
 } pf_vector_t;
 
+typedef struct
+{
+  pf_vector_t pose;
+
+  double weight;
+
+  int id;
+
+} pose_with_weight;
+
+typedef struct 
+{
+  // tmp poses
+  pf_vector_t pose;
+
+  // prior
+  double pr;
+
+  // expected posterior
+  double po;
+
+  // p(z|x, map)
+  double score;
+
+  int id;
+} sample_vector_t;
 
 // The basic matrix
 typedef struct

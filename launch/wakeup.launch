@@ -14,5 +14,8 @@
     <param name="if_print"                  value="false"/>
     <param name="search_width" 	 	    value="12.0"/>
     <param name="wait_time"   	    	    value="4.0"/>
+
+   <!-- some stretch goals parameters -->
+   <param name="if_use_L2"                  value="false"/>
   </node>
 </launch>

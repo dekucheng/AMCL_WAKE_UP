@@ -2,7 +2,7 @@
 
 using namespace std;
 
-MotionMonitor::MotionMonitor(const vector<pf_vector_t>& goal_poses, const vector<pf_vector_t>& origin_poses)
+MotionMonitor::MotionMonitor(const vector<sample_vector_t>& goal_poses, const vector<pose_with_weight>& origin_poses)
 {
     current_pose_init = false;
     amcl_pose = NULL;
@@ -10,18 +10,18 @@ MotionMonitor::MotionMonitor(const vector<pf_vector_t>& goal_poses, const vector
     for (int i=0; i<origin_poses.size(); i++)
     {
         pose_goal pg;
-        pg.pose = origin_poses[i];
+        pg.pose = origin_poses[i].pose;
 
         move_base_msgs::MoveBaseActionGoal goal;
         goal.header.seq = i;
         goal.header.stamp = ros::Time::now();
         goal.goal.target_pose.header.frame_id = "map";
-        goal.goal.target_pose.pose.position.x = goal_poses[i].v[0];
-        goal.goal.target_pose.pose.position.y = goal_poses[i].v[1];
+        goal.goal.target_pose.pose.position.x = goal_poses[i].pose.v[0];
+        goal.goal.target_pose.pose.position.y = goal_poses[i].pose.v[1];
         goal.goal.target_pose.pose.position.z = 0.0;
 
         tf2::Quaternion q;
-        q.setRPY(0.0, 0.0, goal_poses[i].v[2]);
+        q.setRPY(0.0, 0.0, goal_poses[i].pose.v[2]);
         geometry_msgs::Quaternion q_;
         q_ = tf2::toMsg(q);
         goal.goal.target_pose.pose.orientation = q_;

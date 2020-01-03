@@ -39,16 +39,6 @@
 #include "tf2_ros/transform_listener.h"
 #include "message_filters/subscriber.h"
 
-typedef struct
-{
-  pf_vector_t pose;
-
-  double weight;
-
-  int id;
-
-} pose_with_weight;
-
 
 using namespace std;
 
@@ -73,27 +63,34 @@ class WakeUp
     double min_range;
     double grid_size;
     double search_width;
-    bool laser_simu_req;
-    vector<pf_vector_t> cluster_poses;
-    vector<pf_vector_t> cluster_poses_tmp;
+    bool cluster_receive_req;
+    vector<pose_with_weight> cluster_poses;
+    vector<sample_vector_t> cluster_poses_tmp;
     vector<vector<double>> fake_readings_clust;
+    vector<vector<double>> cluster_scores;
 
     map_t* map_;
     bool map_converted;
     bool use_map_topic;
     double max_occ_dist;
 
+    // some parameters
     bool IFVISUALIZE_FAKE_LASER;
     bool IFVISUALIZE_SEARCH;
     bool IF_PRINT;
+    bool IF_USE_L2;
     double wait_time;
+    int CONVERGE_ITE_LIMIT;
+
+    int ITE_COUNT;
 
     void requestMap();
     void handleMapMessage(const nav_msgs::OccupancyGrid& msg);
     void freememory();
     map_t* convertMap(const nav_msgs::OccupancyGrid& map_msg);
     void clusterPoseReceived(const amcl_wakeup::PoseArrayWithWeightConstPtr& msg);
-    bool laserSimulate();
+    bool check_tmp_poses() const;
+    void laserSimulate(int index);
     // cluster callbacks
     void handleClusterPose(const amcl_wakeup::PoseArrayWithWeight& msg);
     void calc_fake_readings_stats();
@@ -106,7 +103,9 @@ class WakeUp
     double z_hit, z_rand, sigma_hit;
     double score_threshold;
     void SimuBeamModelConfig();
-    double LikelihoodFieldModel(const vector<double> &fake_reading, const vector<pf_vector_t> &poses);
+    void LikelihoodFieldModel(const vector<double>& fake_reading, vector<sample_vector_t>& poses);
+    double evaluate_scores_L2(const vector<vector<double>>& clst_scores, vector<sample_vector_t>& tmp_poses);
+    sample_vector_t evaluate_scores_prob(const vector<vector<double>>& clst_scores, vector<sample_vector_t>& tmp_poses);
 
     // communicate with move_base
     MotionMonitor* mtmonitor;
@@ -119,15 +118,15 @@ class WakeUp
 WakeUp::WakeUp() :
       private_nh_("~"),
       current_goal(NULL),
-      last_tracking_goal_id(-1)
+      last_tracking_goal_id(-1),
+      use_map_topic(false),
+      cluster_receive_req(true),
+      map_converted(false),
+      grid_size(0.05),
+      max_occ_dist(2.0),
+      check_clust_num(-1),
+      CHECK_CLUST_NUM_CHANGE(false)
 {
-    use_map_topic = false;
-    laser_simu_req = true;
-    map_converted = false;
-    grid_size = 0.05;
-    max_occ_dist = 2.0;
-    check_clust_num = -1;
-    CHECK_CLUST_NUM_CHANGE = false;
 
     cluster_pose_sub = nh_.subscribe("cluster_poses", 5, &WakeUp::clusterPoseReceived, this);
     marker_pub = nh_.advertise<visualization_msgs::Marker>("visualization_fakelaser_marker", 2);
@@ -151,13 +150,13 @@ WakeUp::~WakeUp()
 
 void WakeUp::clusterPoseReceived(const amcl_wakeup::PoseArrayWithWeightConstPtr& msg)
 {
-  if (laser_simu_req && map_converted)
+  if (cluster_receive_req && map_converted)
     handleClusterPose(*msg);
 }
 
 void WakeUp::handleClusterPose(const amcl_wakeup::PoseArrayWithWeight& msg)
 {
-  laser_simu_req = false;
+  cluster_receive_req = false;
   cluster_poses.clear();
   vector<pose_with_weight> PWW;
   for (int i=0; i<msg.poses.size(); i++)
@@ -197,24 +196,30 @@ void WakeUp::handleClusterPose(const amcl_wakeup::PoseArrayWithWeight& msg)
     for (int j=0; j<pww->size(); j++)
     {
       weight += (*pww)[j].weight;
-
     }
 
-    cout << "weight for each sub lab pww is " << weight << endl;
-
-
-    pf_vector_t cl_p;
-    cl_p.v[0] = cl_p.v[1] = cl_p.v[2] = 0.0;
-
+    // convert cluster poses to the desired datatype
+    pose_with_weight cl_p;
+    cl_p.pose.v[0] = cl_p.pose.v[1] = cl_p.pose.v[2] = 0.0;
+    cl_p.id = i;
+    cl_p.weight = weight;
     for (int j=0; j<pww->size(); j++)
     {
-      cl_p.v[0] += (*pww)[j].weight/weight * (*pww)[j].pose.v[0];
-      cl_p.v[1] += (*pww)[j].weight/weight * (*pww)[j].pose.v[1];
-      cl_p.v[2] += (*pww)[j].weight/weight * (*pww)[j].pose.v[2];
-      cout << "the cl_p is " << (*pww)[j].pose.v[0] << "    " << (*pww)[j].pose.v[1] << "     " << (*pww)[j].pose.v[2] << endl;
+      cl_p.pose.v[0] += (*pww)[j].weight/weight * (*pww)[j].pose.v[0];
+      cl_p.pose.v[1] += (*pww)[j].weight/weight * (*pww)[j].pose.v[1];
+      cl_p.pose.v[2] += (*pww)[j].weight/weight * (*pww)[j].pose.v[2];
     }
 
     cluster_poses.push_back(cl_p);
+  }
+
+  sort(cluster_poses.begin(), cluster_poses.end(), [](pose_with_weight a, pose_with_weight b) {return a.weight>b.weight;});
+  
+  for (int i=0; i<cluster_poses.size(); i++)
+  {
+    // relabel id
+    cluster_poses[i].id = i;
+    cout << "the total weight for cluster " << cluster_poses[i].id << " is : " << cluster_poses[i].weight << endl;
   }
 
   ROS_INFO("%d cluster poses got!!!", cluster_poses.size());
@@ -222,7 +227,7 @@ void WakeUp::handleClusterPose(const amcl_wakeup::PoseArrayWithWeight& msg)
   if (cluster_poses.size()==1)
   {
     ROS_INFO("amcl pose converges, no need to do grid map searching!");
-    laser_simu_req = true;
+    cluster_receive_req = true;
   }
   else
   {
@@ -230,12 +235,15 @@ void WakeUp::handleClusterPose(const amcl_wakeup::PoseArrayWithWeight& msg)
     if (DEBUG)
       {
         ROS_INFO("Starting DEBUG MODE!!!");
-        if (laserSimulate());
-          double L2 = LikelihoodFieldModel(fake_readings_clust[0], cluster_poses);
+        if (check_tmp_poses());
+        {
+          laserSimulate(0);
+          // double L2 = LikelihoodFieldModel(fake_readings_clust[0], cluster_poses);
+        }
       }
     else
       grid_map_search();
-    // laser_simu_req = true;
+    // cluster_receive_req = true;
   }
 }
 
@@ -348,41 +356,44 @@ void WakeUp::updateAMCL(const geometry_msgs::PoseWithCovarianceStampedConstPtr& 
   mutex_.unlock();
 }
 
-bool WakeUp::laserSimulate()
+bool WakeUp::check_tmp_poses() const
+{
+  for (int i=0; i<cluster_poses_tmp.size(); i++)
+  {
+    double x,y;
+    x = cluster_poses_tmp[i].pose.v[0];
+    y = cluster_poses_tmp[i].pose.v[1];
+    int mi_, mj_;
+    mi_ = MAP_GXWX(map_, x);
+    mj_ = MAP_GXWX(map_, y);
+
+    if (!MAP_VALID(map_, mi_, mj_))
+      return false;
+
+    else
+    {
+      int occ_state;
+      double occ_dist;
+      occ_state = map_->cells[MAP_INDEX(map_,mi_,mj_)].occ_state;
+      occ_dist = map_->cells[MAP_INDEX(map_,mi_,mj_)].occ_dist;
+      if (occ_state != -1 || occ_dist < 0.20)
+          return false;
+    }
+  }
+  return true;
+}
+
+// take in an index?
+void WakeUp::laserSimulate(int index)
 {
   // clear fake readings
   fake_readings_clust.clear();
-  // check if all tmp poses are valid
-
   pf_vector_t P;
   if (DEBUG)
-    P = cluster_poses[0];
-  else
-  {
-    P = cluster_poses_tmp[0];
-    for (int i=0; i<cluster_poses_tmp.size(); i++)
-    {
-      double x,y;
-      x = cluster_poses_tmp[i].v[0];
-      y = cluster_poses_tmp[i].v[1];
-      int mi_, mj_;
-      mi_ = MAP_GXWX(map_, x);
-      mj_ = MAP_GXWX(map_, y);
+    P = cluster_poses[0].pose;
+  else  
+    P = cluster_poses_tmp[index].pose;
 
-      if (!MAP_VALID(map_, mi_, mj_))
-        return false;
-
-      else
-      {
-        int occ_state;
-        double occ_dist;
-        occ_state = map_->cells[MAP_INDEX(map_,mi_,mj_)].occ_state;
-        occ_dist = map_->cells[MAP_INDEX(map_,mi_,mj_)].occ_dist;
-        if (occ_state != -1 || occ_dist < 0.20)
-            return false;
-      }
-    }
-  }
 
   double theta = P.v[2];
   double dtheta;
@@ -404,7 +415,7 @@ bool WakeUp::laserSimulate()
             //  "fake scan simy is %f \n"
             //  "range*cos(theta) is %f \n"
             //  "range*sin(theta) is %f \n"
-            //  "pose_x is %f pose_y is %f !!!", simx, simy, range*cos(theta), range*sin(theta), cluster_poses[i].v[0], cluster_poses[i].v[1]);
+            //  "pose_x is %f pose_y is %f !!!", simx, simy, range*cos(theta), range*sin(theta), cluster_poses[i].pose.v[0], cluster_poses[i].pose.v[1]);
 
     if (MAP_VALID(map_, mi, mj))
     {
@@ -443,8 +454,6 @@ bool WakeUp::laserSimulate()
     fake_readings.push_back(range);
   }
   fake_readings_clust.push_back(fake_readings);
-
-  return true;
 }
 
 void WakeUp::checkmovestatus(const actionlib_msgs::GoalStatusArrayConstPtr& msg)
@@ -464,7 +473,7 @@ void WakeUp::checkmovestatus(const actionlib_msgs::GoalStatusArrayConstPtr& msg)
     odom_sub.shutdown();
     delete mtmonitor;
     current_goal = NULL;
-    laser_simu_req = true;
+    cluster_receive_req = true;
     ROS_INFO("hang off for amcl convergence!");
     ros::Duration d(wait_time);
     d.sleep();
@@ -480,8 +489,8 @@ void WakeUp::grid_map_search()
     return;    
   }
   
-  // pick one pose from cluster poses (to do: pick the one with highes score)
-  double theta_ = cluster_poses[0].v[2];
+  // pick one pose from cluster poses (to do: pick the one with highest score)
+  double theta_ = cluster_poses[0].pose.v[2];
   double dtheta_ = 0.0 - theta_;
   double step = grid_size;
   double search_width_t = grid_size; // first search_width
@@ -511,11 +520,12 @@ void WakeUp::grid_map_search()
         if (c_loop_count==1)
         {
           // Initialize temporary cluster poses
-          pf_vector_t tmp_pose;
-          theta_turned[i] = theta_loop[i] = cluster_poses[i].v[2] + dtheta_;
-          tmp_pose.v[0] = cluster_poses[i].v[0] + search_width_t*cos(theta_turned[i]);
-          tmp_pose.v[1] = cluster_poses[i].v[1] + search_width_t*sin(theta_turned[i]); 
-          tmp_pose.v[2] = cluster_poses[i].v[2];
+          sample_vector_t tmp_pose;
+          theta_turned[i] = theta_loop[i] = cluster_poses[i].pose.v[2] + dtheta_;
+          tmp_pose.pose.v[0] = cluster_poses[i].pose.v[0] + search_width_t*cos(theta_turned[i]);
+          tmp_pose.pose.v[1] = cluster_poses[i].pose.v[1] + search_width_t*sin(theta_turned[i]); 
+          tmp_pose.pose.v[2] = cluster_poses[i].pose.v[2];
+          tmp_pose.pr = cluster_poses[i].weight;
           cluster_poses_tmp.push_back(tmp_pose);
         }
         else 
@@ -523,13 +533,14 @@ void WakeUp::grid_map_search()
           double t = theta_loop[i];
           ROS_ASSERT(cluster_poses_tmp.size() == cluster_poses.size());
 
-          cluster_poses_tmp[i].v[0] += step*cos(t);
-          cluster_poses_tmp[i].v[1] += step*sin(t);
+          cluster_poses_tmp[i].pose.v[0] += step*cos(t);
+          cluster_poses_tmp[i].pose.v[1] += step*sin(t);
         }
+        cluster_poses_tmp[i].id = cluster_poses[i].id;
       }
 
-
-      if (laserSimulate()) // Simulate Succeed, which means tmp poses are valid
+      // add for loop here to simulate all required readings
+      if (check_tmp_poses()) // Simulate Succeed, which means tmp poses are valid
       {
         if (IFVISUALIZE_SEARCH)
         {
@@ -551,26 +562,45 @@ void WakeUp::grid_map_search()
           for(int i=0; i<cluster_poses_tmp.size(); i++)
           {
             geometry_msgs::Point p;
-            p.x = cluster_poses_tmp[i].v[0];
-            p.y = cluster_poses_tmp[i].v[1];
+            p.x = cluster_poses_tmp[i].pose.v[0];
+            p.y = cluster_poses_tmp[i].pose.v[1];
             p.z = 0.0;
             points.points.push_back(p); 
           }
           marker_pub_.publish(points);
         }
-        double L2;
-        L2 = LikelihoodFieldModel(fake_readings_clust[0], cluster_poses_tmp);
-        if(IF_PRINT)
-          cout << "fake reading L2 distance for current searching is :  " << L2 << "  !!!" << endl;
-        if (L2 > score_threshold)
-        {
-          ROS_INFO("Distinctive grids found!!! Check tmp poses for navigation, L2 is %f", L2);
+        
+        // current laserSimulating pose
+        int simu_index = 0;
+        laserSimulate(simu_index);
+        LikelihoodFieldModel(fake_readings_clust[0], cluster_poses_tmp);
+        bool grid_found = false;
+        if (IF_USE_L2) {
+          double L2;
+          L2 = evaluate_scores_L2(cluster_scores, cluster_poses_tmp);
+          if (L2 > score_threshold)
+            grid_found = true;
+          if(IF_PRINT)
+            cout << "fake reading L2 distance for current searching is :  " << L2 << "  !!!" << endl;
+        }
+        else {
+          sample_vector_t min_po_pose;
+          min_po_pose = evaluate_scores_prob(cluster_scores, cluster_poses_tmp);
+          
+          double threshold = 0.01;
+          double simul_prob = min_po_pose.po * cluster_poses_tmp[simu_index].pr;
+          if (simul_prob < threshold)
+            grid_found = true;
+        }
+
+        if (grid_found) {
           mtmonitor = new MotionMonitor(cluster_poses_tmp, cluster_poses);
           odom_sub = nh_.subscribe("odom", 10, &MotionMonitor::getCurrentOdom, mtmonitor);
           amcl_sub = nh_.subscribe("amcl_pose", 2, &WakeUp::updateAMCL, this);
           move_base_goal_sub = nh_.subscribe("move_base/status", 2, &WakeUp::checkmovestatus, this);
           return;
         }
+    
         // calc_fake_readings_stats();
         // if (!if_mean_init)
         // {
@@ -650,14 +680,16 @@ void WakeUp::SimuBeamModelConfig()
   private_nh_.param("if_print", IF_PRINT, true);
   private_nh_.param("search_width", search_width, 4.0);
   private_nh_.param("wait_time", wait_time, 10.0);
+  private_nh_.param("if_use_L2", IF_USE_L2, true);
+  private_nh_.param("converge_ite_limit", CONVERGE_ITE_LIMIT, 16);
+  
 }
 
-double WakeUp::LikelihoodFieldModel(const vector<double> &fake_reading, const vector<pf_vector_t> &poses)
+void WakeUp::LikelihoodFieldModel(const vector<double> &fake_reading, vector<sample_vector_t> &poses) 
 {
   int i,j;
   double z,pz;
-  double p;
-  double total_score = 0.0;
+  double p, total=0.0;
   pf_vector_t hit, pose;
 
   visualization_msgs::Marker points;
@@ -675,15 +707,15 @@ double WakeUp::LikelihoodFieldModel(const vector<double> &fake_reading, const ve
   points.color.r = 1.0f;
   points.color.g = 1.0f;
   points.color.a = 1.0;
-
-  vector<vector<double>> clust_scores;
+  
+  cluster_scores.clear();
   vector<double> one_cls_score;
   for (j=0; j<poses.size(); j++)
   {
     one_cls_score.clear();
 
-    pose = poses[j];
-    p = 1.0;
+    pose = poses[j].pose;
+    p = 0.0;
 
     double z_hit_denom = 2 * sigma_hit * sigma_hit;
     double z_rand_mult = 1.0/max_range;
@@ -734,66 +766,78 @@ double WakeUp::LikelihoodFieldModel(const vector<double> &fake_reading, const ve
       pt.y = MAP_WYGY(map_,mj);
       pt.z = 0.0;
       points.points.push_back(pt); 
-
       one_cls_score.push_back(pzc);
-
-      // cout << i << "th cluster pzc is: " << pzc << endl;
-
     }
     assert(one_cls_score.size()==max_beams);
-    total_score += p;
-    clust_scores.push_back(one_cls_score);
+    cluster_scores.push_back(one_cls_score);
+    // add score to tmp poses
+    poses[j].score = p;
+    total += p;
     // print total score for each cluster pose
     if (IF_PRINT)
       cout << "total score for cluster" << j << "is :" << p << "reading size is" << fake_reading.size() << endl;
   }
-
-  // calculate L2 distance of total score
-  ROS_ASSERT(clust_scores.size()>1);
-  double max_L2;
-  for (int i=1; i<clust_scores.size(); i++)
-  {
-    double L2 = 0.0;
-    for (int j=0; j<max_beams; j++)
-    {
-      double truth = clust_scores[0][j];          // which is the score of fake readings
-      L2 += pow(truth-clust_scores[i][j], 2);
-    }
-    L2 = sqrt(L2);
-    max_L2 = max(max_L2, L2);
+  // normalize
+  for (auto &x:poses) {
+    x.score /= total;
+    assert(x.score<1.0);
   }
-
-  // double mean = total_score/(double)poses.size();
-  // double var=0.0;
-  // for (int i=0; i<clust_scores.size(); i++)
-  // {
-  //   var += 1/(double)clust_scores.size() * pow((clust_scores[i]-mean), 2);
-  // }
-   
-  // vector<double> m_;
-  // m_.resize(max_beams, 0.0);
-  // double var = 0.0;
-  // int sz = clust_scores.size();
-  // // each laser
-  // for (int i=0; i<max_beams; i++)
-  // {
-  //   for (int j=0; j<sz; j++) // each clust
-  //   {
-  //     m_[i] += clust_scores[j][i]/(double)sz;
-  //   }
-
-  //   for (int j=0; j<sz; j++)
-  //   {
-  //     var += pow(clust_scores[j][i]-m_[i], 2.0)/(double)sz;
-  //   }
-  // }
 
   if (IFVISUALIZE_FAKE_LASER)
     marker_pub.publish(points);
 
-  return max_L2/(double)max_beams;
+  ROS_ASSERT(cluster_scores.size()>1);
 }
 
+double WakeUp::evaluate_scores_L2(const vector<vector<double>>& clst_scores, vector<sample_vector_t>& tmp_poses) 
+{
+    // calculate L2 distance of total score
+  double max_L2;
+  for (int i=1; i<clst_scores.size(); i++)
+  {
+    double L2 = 0.0, score = 0.0;
+    for (int j=0; j<max_beams; j++)
+    {
+      double truth = clst_scores[0][j];          // which is the score of fake readings
+      L2 += pow(truth-clst_scores[i][j], 2);
+    }
+    L2 = sqrt(L2);
+    max_L2 = max(max_L2, L2);
+  }
+    return max_L2/(double)max_beams;
+}
+
+sample_vector_t WakeUp::evaluate_scores_prob(const vector<vector<double>>& clst_scores, vector<sample_vector_t>& tmp_poses)
+{
+  sample_vector_t min_po_sample;
+  min_po_sample.po = 1.0;
+  // for each iteration, normalize
+  assert(CONVERGE_ITE_LIMIT > 0);
+
+  for (int ite=0; ite<CONVERGE_ITE_LIMIT; ite++)
+  {
+    double norm = 0.0;
+    for (int i=0; i<tmp_poses.size(); i++) {
+      if (ite==0)
+        tmp_poses[i].po = tmp_poses[i].pr;
+      else {
+        tmp_poses[i].po *= tmp_poses[i].score;
+        norm += tmp_poses[i].po;
+      }
+    }
+    if (ite>0) {
+      for (int i=0; i<tmp_poses.size(); i++) {
+        tmp_poses[i].po /= norm;
+        if (tmp_poses[i].po < min_po_sample.po) {
+          min_po_sample = tmp_poses[i];
+        }
+        cout << "tmp_cluster_poses " << i << "'s pr po score are " << tmp_poses[i].pr << " " << tmp_poses[i].po
+        << "  " << tmp_poses[i].score << endl;
+      }
+    }
+  }
+  return min_po_sample;
+}
 
 map_t* WakeUp::convertMap( const nav_msgs::OccupancyGrid& map_msg )
 {

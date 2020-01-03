@@ -8,6 +8,8 @@
 #include <memory>
 #include <mutex>
 
+#include "amcl_wakeup/pf/pf_vector.h"
+
 #include "move_base_msgs/MoveBaseActionGoal.h"
 #include "nav_msgs/Odometry.h"
 
@@ -41,7 +43,7 @@ typedef struct
 class MotionMonitor
 {
  public:
-    MotionMonitor(const vector<pf_vector_t>& goal_poses, const vector<pf_vector_t>& orgin_poses);
+    MotionMonitor(const vector<sample_vector_t>& goal_poses, const vector<pose_with_weight>& orgin_poses);
     ~MotionMonitor();
 
     // callback functions

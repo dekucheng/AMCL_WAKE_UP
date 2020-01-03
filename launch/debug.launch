@@ -1,0 +1,17 @@
+<launch>
+  <!-- Arguments -->
+  <arg name="map_file" default="$(find amcl_wakeup)/maps/map_asym_longhallway_2.yaml"/>
+  <arg name="open_rviz" default="true"/>
+
+  <!-- Bag File -->
+  <node pkg="rosbag" type="play" name="player" output="screen" args="--clock /home/zhicheng/turtlebot3ws/src/amcl_wakeup/files/debug.bag"/>
+  <!-- Map server -->
+  <node pkg="map_server" name="map_server" type="map_server" args="$(arg map_file)"/>
+
+  <!-- rviz -->
+  <group if="$(arg open_rviz)">
+    <node pkg="rviz" type="rviz" name="rviz" required="true"
+          args="-d $(find turtlebot3_navigation)/rviz/turtlebot3_navigation.rviz"/>
+  </group>
+</launch>
+
