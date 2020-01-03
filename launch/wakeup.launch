@@ -5,8 +5,8 @@
 
     <param name="laser_max_range"           value="1.5"/>
     <param name="laser_max_beams"           value="48"/>
-    <param name="laser_z_hit"               value="0.95"/>
-    <param name="laser_z_rand"              value="0.05"/>
+    <param name="laser_z_hit"               value="0.5"/>
+    <param name="laser_z_rand"              value="0.5"/>
     <param name="laser_sigma_hit"           value="0.2"/>
     <param name="laser_model_type"          value="likelihood_field"/>
     <param name="if_debug"                  value="false"/>
@@ -17,5 +17,6 @@
 
    <!-- some stretch goals parameters -->
    <param name="if_use_L2"                  value="false"/>
+   <param name="converge_ite_limit"         value="15"/>
   </node>
 </launch>

@@ -63,10 +63,10 @@ class WakeUp
     double min_range;
     double grid_size;
     double search_width;
-    bool cluster_receive_req;
+    bool search_req;
     vector<pose_with_weight> cluster_poses;
     vector<sample_vector_t> cluster_poses_tmp;
-    vector<vector<double>> fake_readings_clust;
+    vector<double> fake_readings;
     vector<vector<double>> cluster_scores;
 
     map_t* map_;
@@ -111,8 +111,10 @@ class WakeUp
     MotionMonitor* mtmonitor;
     move_base_msgs::MoveBaseActionGoal* current_goal;
     int last_tracking_goal_id;
-    int check_clust_num;
-    bool CHECK_CLUST_NUM_CHANGE;
+    int last_clust_num;
+    int current_clust_num;
+    bool check_clust_num_change;
+    int ite_count;
 };
 
 WakeUp::WakeUp() :
@@ -120,12 +122,14 @@ WakeUp::WakeUp() :
       current_goal(NULL),
       last_tracking_goal_id(-1),
       use_map_topic(false),
-      cluster_receive_req(true),
+      search_req(true),
       map_converted(false),
       grid_size(0.05),
       max_occ_dist(2.0),
-      check_clust_num(-1),
-      CHECK_CLUST_NUM_CHANGE(false)
+      last_clust_num(-1),
+      current_clust_num(-1),
+      check_clust_num_change(false),
+      ite_count(0)
 {
 
     cluster_pose_sub = nh_.subscribe("cluster_poses", 5, &WakeUp::clusterPoseReceived, this);
@@ -150,13 +154,14 @@ WakeUp::~WakeUp()
 
 void WakeUp::clusterPoseReceived(const amcl_wakeup::PoseArrayWithWeightConstPtr& msg)
 {
-  if (cluster_receive_req && map_converted)
+  if ((search_req || check_clust_num_change) && map_converted) {
+    assert(search_req != check_clust_num_change);
     handleClusterPose(*msg);
+  }
 }
 
 void WakeUp::handleClusterPose(const amcl_wakeup::PoseArrayWithWeight& msg)
 {
-  cluster_receive_req = false;
   cluster_poses.clear();
   vector<pose_with_weight> PWW;
   for (int i=0; i<msg.poses.size(); i++)
@@ -224,26 +229,39 @@ void WakeUp::handleClusterPose(const amcl_wakeup::PoseArrayWithWeight& msg)
 
   ROS_INFO("%d cluster poses got!!!", cluster_poses.size());
     // lock_guard<mutex> guard(mutex_);
+
+  if (check_clust_num_change) {
+    current_clust_num = cluster_poses.size();
+    ite_count++;
+    // if size = 1, this will hold and res will be printed
+    if (current_clust_num != last_clust_num) {
+      check_clust_num_change = false;
+      search_req = true;
+      ROS_INFO("cluster dropped!");
+      cout << ite_count << " ites happened before cluster dropped, the ite limit is " << CONVERGE_ITE_LIMIT << endl;
+      ite_count = 0;
+    }
+  }
   if (cluster_poses.size()==1)
   {
     ROS_INFO("amcl pose converges, no need to do grid map searching!");
-    cluster_receive_req = true;
+    search_req = false;
   }
   else
   {
     // keep updating current searching grid poses
-    if (DEBUG)
-      {
+    if (DEBUG) {
         ROS_INFO("Starting DEBUG MODE!!!");
         if (check_tmp_poses());
-        {
           laserSimulate(0);
-          // double L2 = LikelihoodFieldModel(fake_readings_clust[0], cluster_poses);
-        }
+          // double L2 = LikelihoodFieldModel(fake_readings[0], cluster_poses);
       }
-    else
+    else if(search_req) {
+      search_req = false;
+      last_clust_num = current_clust_num = cluster_poses.size();
       grid_map_search();
-    // cluster_receive_req = true;
+    }
+    // search_req = true;
   }
 }
 
@@ -387,7 +405,7 @@ bool WakeUp::check_tmp_poses() const
 void WakeUp::laserSimulate(int index)
 {
   // clear fake readings
-  fake_readings_clust.clear();
+  fake_readings.clear();
   pf_vector_t P;
   if (DEBUG)
     P = cluster_poses[0].pose;
@@ -399,7 +417,6 @@ void WakeUp::laserSimulate(int index)
   double dtheta;
   dtheta = (2*M_PI / (double)max_beams);
 
-  vector<double> fake_readings;
   for (int j=0; j<max_beams; j++)
   {
     // simulate each ray casting
@@ -453,7 +470,6 @@ void WakeUp::laserSimulate(int index)
       range = max_range;
     fake_readings.push_back(range);
   }
-  fake_readings_clust.push_back(fake_readings);
 }
 
 void WakeUp::checkmovestatus(const actionlib_msgs::GoalStatusArrayConstPtr& msg)
@@ -473,10 +489,15 @@ void WakeUp::checkmovestatus(const actionlib_msgs::GoalStatusArrayConstPtr& msg)
     odom_sub.shutdown();
     delete mtmonitor;
     current_goal = NULL;
-    cluster_receive_req = true;
-    ROS_INFO("hang off for amcl convergence!");
-    ros::Duration d(wait_time);
-    d.sleep();
+    if (IF_USE_L2) {
+      search_req = true;
+      ROS_INFO("hang off for amcl convergence!");
+      ros::Duration d(wait_time);
+      d.sleep();
+    }
+    else {
+      check_clust_num_change = true;
+    }
   }
 }
 
@@ -488,7 +509,7 @@ void WakeUp::grid_map_search()
     ROS_WARN("Cluster Poses not available, grid map search failed");
     return;    
   }
-  
+
   // pick one pose from cluster poses (to do: pick the one with highest score)
   double theta_ = cluster_poses[0].pose.v[2];
   double dtheta_ = 0.0 - theta_;
@@ -572,10 +593,10 @@ void WakeUp::grid_map_search()
         
         // current laserSimulating pose
         int simu_index = 0;
-        laserSimulate(simu_index);
-        LikelihoodFieldModel(fake_readings_clust[0], cluster_poses_tmp);
         bool grid_found = false;
         if (IF_USE_L2) {
+          laserSimulate(simu_index);
+          LikelihoodFieldModel(fake_readings, cluster_poses_tmp); 
           double L2;
           L2 = evaluate_scores_L2(cluster_scores, cluster_poses_tmp);
           if (L2 > score_threshold)
@@ -584,19 +605,33 @@ void WakeUp::grid_map_search()
             cout << "fake reading L2 distance for current searching is :  " << L2 << "  !!!" << endl;
         }
         else {
-          sample_vector_t min_po_pose;
-          min_po_pose = evaluate_scores_prob(cluster_scores, cluster_poses_tmp);
+          double lhs_known_prob = 0.0;
+          double prob_threshold = 0.001;
+          grid_found = true;
+          // simulate fake readings of all clusters
+          for (simu_index=0; simu_index<cluster_poses.size(); simu_index++) {
+            laserSimulate(simu_index);
+            LikelihoodFieldModel(fake_readings, cluster_poses_tmp); 
+            sample_vector_t min_po_pose;
+            min_po_pose = evaluate_scores_prob(cluster_scores, cluster_poses_tmp);
+            
+            double simul_prob = min_po_pose.po * cluster_poses_tmp[simu_index].pr;
           
-          double threshold = 0.01;
-          double simul_prob = min_po_pose.po * cluster_poses_tmp[simu_index].pr;
-          if (simul_prob < threshold)
-            grid_found = true;
+            if (simul_prob >= prob_threshold) {
+              grid_found = false;
+              break;
+            }
+            else {
+              lhs_known_prob += simul_prob;
+              prob_threshold -= lhs_known_prob;
+            }
+          }
         }
 
         if (grid_found) {
           mtmonitor = new MotionMonitor(cluster_poses_tmp, cluster_poses);
           odom_sub = nh_.subscribe("odom", 10, &MotionMonitor::getCurrentOdom, mtmonitor);
-          amcl_sub = nh_.subscribe("amcl_pose", 2, &WakeUp::updateAMCL, this);
+          amcl_sub = nh_.subscribe("amcl_pose", 5, &WakeUp::updateAMCL, this);
           move_base_goal_sub = nh_.subscribe("move_base/status", 2, &WakeUp::checkmovestatus, this);
           return;
         }
@@ -831,8 +866,8 @@ sample_vector_t WakeUp::evaluate_scores_prob(const vector<vector<double>>& clst_
         if (tmp_poses[i].po < min_po_sample.po) {
           min_po_sample = tmp_poses[i];
         }
-        cout << "tmp_cluster_poses " << i << "'s pr po score are " << tmp_poses[i].pr << " " << tmp_poses[i].po
-        << "  " << tmp_poses[i].score << endl;
+        // cout << "tmp_cluster_poses " << i << "'s pr po score are " << tmp_poses[i].pr << " " << tmp_poses[i].po
+        // << "  " << tmp_poses[i].score << endl;
       }
     }
   }

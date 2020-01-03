@@ -463,7 +463,7 @@ AmclNode::AmclNode() :
   tf_.reset(new tf2_ros::Buffer());
   tfl_.reset(new tf2_ros::TransformListener(*tf_));
 
-  pose_pub_ = nh_.advertise<geometry_msgs::PoseWithCovarianceStamped>("amcl_pose", 2, true);
+  pose_pub_ = nh_.advertise<geometry_msgs::PoseWithCovarianceStamped>("amcl_pose", 5, true);
   particlecloud_pub_ = nh_.advertise<geometry_msgs::PoseArray>("particlecloud", 2, true);
   cluster_poses_pub_ = nh_.advertise<amcl_wakeup::PoseArrayWithWeight>("cluster_poses", 2, true);
   global_loc_srv_ = nh_.advertiseService("global_localization", 
@@ -1441,6 +1441,7 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
        */
 
       pose_pub_.publish(p);
+      std::cout << "-----! amcl pose published!" << std::endl;
       last_published_pose = p;
 
       ROS_DEBUG("New pose: %6.3f %6.3f %6.3f",
