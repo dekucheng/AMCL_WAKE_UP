@@ -24,7 +24,7 @@ See the demo running in real world [here](https://youtu.be/afoSvsJPn9E).
   * [Grid Map Searching](#Grid-Map-Searching)
   * [Experimental Results](#Experimental-Results)
   * [Drawbacks](#Drawbacks)
-  * [Adaptive Threshold](#Adaptive Threshold)
+  * [Adaptive Threshold](#Adaptive-Threshold)
 - [6. Acknowledgement](#Acknowledgement)
 
 ## Build Gazebo Plugin
