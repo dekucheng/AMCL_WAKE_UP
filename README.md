@@ -184,7 +184,7 @@ So far there are two drawbacks in this method:
 3. Since the global initialization is required, the number of initial particles needs to be quite large to capture all potential states, otherwise the true state may be lost. This results in a slow convergence at the beginning, thus this method is not suitable for the scenario where the robot has to locate itself quickly after boot up.
 
 ### Adaptive Threshold
-Recall that the **drop out fake clusters** step processes based on AMCL resample step. We wait for fake clusters to be dropped out after the robot taking the control **u** to navigate to the desired state set.
+Recall that the **drop out bad state clusters** step processes based on AMCL resample step. We wait for bad state clusters to be dropped out after the robot taking the control **u** to navigate to the desired state set.
 
 To judge if current searching state set is the desired one, previously we used a threshold **ε<sub>L2</sub>**, which is a fixed **L2 distance** between measurement scores. Such threshold is chosen completely depending on practice, which doesn't make much sense.
 
@@ -194,7 +194,7 @@ Alternatively, an adaptive threshold can be adopted. As is proposed, a fake sens
   <img src = "files/eq0.png">
 </p>
 
-where **j** denotes the **id** of uncertain state cluster, **i** denotes the state cluster from which the fake ray casting is generated, **N** denotes the number of iterations, **η** denotes the normalize term.
+where **j** denotes the **id** of uncertain state cluster, **i** denotes the state cluster from which the fake ray casting is generated, **N (the number we set)** denotes the number of iterations, **η** denotes the normalize term.
 
 For this case, we assume that a state cluster is dropped out if the weight of it is less than **e = 0.001** (set manually) after **N** iterations once the robot is navigated to that "state set":
 
@@ -218,11 +218,11 @@ The calculated belief(posterior) above is under ideal condition, in practice AMC
 
 where **n** denotes the number of particles, **ε** denotes the **K-L** distance between approximated distribution and the true distribution, **k** denotes the number of bins, **X<sub>k-1, 1-𝛿</sub>** denotes the **1-𝛿** quantile of chi-square distribution with **k-1** degrees of freedom. **z<sub>1-𝛿</sub>** denotes the **1-𝛿** quantile of a standard normal random variable.
 
-The equation means that if the number of particles **N** is larger than **n** expressed above, the **K-L distance** between the maximum likelihood estimation based the particles and the true distribution has probability **1-𝛿** to be less than **ε**.
+The equation means that if the number of particles **N** is larger than **n** expressed above, the **K-L distance** between the maximum likelihood estimation (MLE) based the particles and the true distribution has probability **1-𝛿** to be less than **ε**.
 
-Here in practice the number of bins, which is the number of state clusters, is usually no larger than 10, thus with the particles already exist in AMCL (usually >5000, even with the minimum required number of particles), the ideal posterior can be approximated quite well with **K-L distance -> 0** in each resample step.
+Here in practice the number of bins, which is the number of state clusters, is usually no larger than 10, thus with the particles already exist in AMCL (usually >5000), the ideal posterior can be approximated quite well with the **K-L distance -> 0** between itself and the **MLE** approximation in each resample step.
 
-Here is how it works:
+Here shows the case that the current searching state group are presented as below. The prior of two states are both 0.5, which meas they have the same number of particles. In this case we use the **z<sub>fake,1</sub>** generated from **X<sub>1</sub>** to show the process:
 
 <p align = "center">
   <img src = "files/Fig8.png">
@@ -232,7 +232,7 @@ Here is how it works:
   <b>Fig 7. Adaptive Threshold </b><br>
 </p>
 
-In Fig 7, the fake reading **z<sub>fake,1</sub>** is generated from **X<sub>1</sub>**, under such condition we have:
+Under such condition we have:
 
 <p align = "left">
   <img src = "files/eq4.png" height = "45px">
@@ -245,6 +245,10 @@ However, the condition that fake reading generated from **X<sub>2</sub>** should
 </p>
 
 We keep calculating such expectation over iterations. If such expectation is less than **0.001** after **N** iterations, state group of **{X<sub>1</sub>, X<sub>2</sub>}** is considered to be the desired state group and the robot is navigated by the corresponding control data **u**.
+
+Since in practice, during the navigation by control data **u**, AMCL still keeps reasampling based on true sensor reading. Thus the true priors of all state clusters usually present in such way: the more-likely state usually has larger prior than expected (which is the prior before taking **u**) while the less-likely state usually has less prior than expected (which is the prior before taking control **u**) after the control **u** finishing its navigation.
+
+If such method is used instead of a fixed threshold of L2 distance, the threshold can be adaptive which always **bounds the number of iterations <= N (the number we set)** before at least one cluster is dropped after taking control data **u**.
 
 
 ## Acknowledgement

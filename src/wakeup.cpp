@@ -253,6 +253,7 @@ void WakeUp::handleClusterPose(const amcl_wakeup::PoseArrayWithWeight& msg)
     if (DEBUG) {
         ROS_INFO("Starting DEBUG MODE!!!");
         if (check_tmp_poses());
+          // using the cluster with id 0 to do ray casting
           laserSimulate(0);
           // double L2 = LikelihoodFieldModel(fake_readings[0], cluster_poses);
       }
