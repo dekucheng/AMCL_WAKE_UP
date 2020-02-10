@@ -24,6 +24,7 @@ See the demo running in real world [here](https://youtu.be/afoSvsJPn9E).
   * [Grid Map Searching](#Grid-Map-Searching)
   * [Experimental Results](#Experimental-Results)
   * [Drawbacks](#Drawbacks)
+  * [Adaptive Threshold](#Adaptive Threshold)
 - [6. Acknowledgement](#Acknowledgement)
 
 ## Build Gazebo Plugin
@@ -154,7 +155,7 @@ As implied above, we have to find the **control** which can take the old state c
 
 As shown in Fig 6, we use two potential states **x<sub>1</sub>** and **x<sub>3</sub>** as examples from the previous case. For the first searched grids pair (two grids marked with index 1), each one's relative transformation to its corresponding potential state is the same as another one's. The searching processes in a **inflating spiral** order with its center at each potential state.
 
-In each searching iteration, a new potential states set is generated. We pick one state from the new potential potential states set and generate its fake sensor reading **z<sub>fake** based on the given map **m**. Then for each potential state in the current searching potential states set we calculate the score **p(z<sub>fake</sub> | map, x<sub>i</sub>)** for all potential state **x<sub>i**. To figure out if there exists a big difference among them, we calculate the maximum L2 distance. If the maximum L2 distance **D<sub>L2</sub> > ε**, where **ε** is a preset threshold, the searching terminates and the robot will navigate to that state.
+In each searching iteration, a new potential states set is generated. We pick one state from the new potential potential states set and generate its fake sensor reading **z<sub>fake** based on the given map **m**. Then for each potential state in the current searching potential states set we calculate the score **p(z<sub>fake</sub> | map, x<sub>i</sub>)** for all potential state **x<sub>i**. To figure out if there exists a big difference among them, we calculate the maximum L2 distance. If the maximum L2 distance **D<sub>L2</sub> > ε<sub>L2</sub>**, where **ε<sub>L2</sub>** is a preset threshold, the searching terminates and the robot will navigate to that state.
 
 The implementation of such idea looks like this with a little difference:
 
@@ -169,18 +170,82 @@ The implementation of such idea looks like this with a little difference:
 
 
 ### Experimental Results
-Since this method only cares about static map, it’s not hard to capture the potential states set with ‘featured states’ in static environment. Once the ‘featured states’ are captured, AMCL always converges well when the robot gets there, as can be observed in the video. The speed of convergence depends on the threshold **ε**. How to set **ε** should depend on the task (e.g. the further we allow the robot to move, the larger **ε** can be set, because when the grid map searching gets further, it has larger probability to capture the featured states
+Since this method only cares about static map, it’s not hard to capture the potential states set with ‘featured states’ in static environment. Once the ‘featured states’ are captured, AMCL always converges well when the robot gets there, as can be observed in the video. The speed of convergence depends on the threshold **ε<sub>L2</sub>**. How to set **ε<sub>L2</sub>** should depend on the task (e.g. the further we allow the robot to move, the larger **ε<sub>L2</sub>** can be set, because when the grid map searching gets further, it has larger probability to capture the featured states
 with big difference).
 
 Also since we only do ray casting once in each iteration, the computation complexity is not that large. It should be fine to run this package on-chip only if the remote PC is relatively powerful.
 
 ### Drawbacks
-So far there are two drawbacks in this proposal:
+So far there are two drawbacks in this method:
 1. It won’t work in **a completely central symmetric map**. (results from the critical drawback of AMCL itself)
 
 2. It is not suitable for the scenario where robots have limitations on movements after being boot up.
 
 3. Since the global initialization is required, the number of initial particles needs to be quite large to capture all potential states, otherwise the true state may be lost. This results in a slow convergence at the beginning, thus this method is not suitable for the scenario where the robot has to locate itself quickly after boot up.
+
+### Adaptive Threshold
+Recall that the **drop out fake clusters** step processes based on AMCL resample step. We wait for fake clusters to be dropped out after the robot taking the control **u** to navigate to the desired state set.
+
+To judge if current searching state set is the desired one, previously we used a threshold **ε<sub>L2</sub>**, which is a fixed **L2 distance** between measurement scores. Such threshold is chosen completely depending on practice, which doesn't make much sense.
+
+Alternatively, an adaptive threshold can be adopted. As is proposed, a fake sensor reading is generated in each searching step, from which we can calculate the cumulative posterior of each state after a certain iterations:
+
+<p align = "left">
+  <img src = "files/eq0.png">
+</p>
+
+where **j** denotes the **id** of uncertain state cluster, **i** denotes the state cluster from which the fake ray casting is generated, **N** denotes the number of iterations, **η** denotes the normalize term.
+
+For this case, we assume that a state cluster is dropped out if the weight of it is less than **e = 0.001** (set manually) after **N** iterations once the robot is navigated to that "state set":
+
+<p align = "left">
+  <img src = "files/eq1.png">
+</p>
+
+However, we are not sure if the state cluster **i**, from which the fake reading is generated, is true or not. Conditioning on the generated **z<sub>fake,i</sub>**, with the known prior for each cluster and  **p(z<sub>fake,i</sub> | x<sub>j</sub>, map)<sup>N</sup>**, **min(bel(x<sub>j,N</sub>|z<sub>fake,i</sub>))** is deterministic. Thus it makes more sense to calculate:
+
+<p align = "left">
+  <img src = "files/eq2.png">
+</p>
+
+If the expectation above is less than **e**, which means by the time after **N** iterations, the particles of at least one state cluster are dying out.
+
+The calculated belief(posterior) above is under ideal condition, in practice AMCL uses large number of particles to approximate the probability distribution of states. In this case, the belief of each state cluster can be viewed as a bin of a **multinomial distribution**.  From [KLD-Sampling](https://papers.nips.cc/paper/1998-kld-sampling-adaptive-particle-filters.pdf) we know:
+
+<p align = "left">
+  <img src = "files/eq3.png">
+</p>
+
+where **n** denotes the number of particles, **ε** denotes the **K-L** distance between approximated distribution and the true distribution, **k** denotes the number of bins, **X<sub>k-1, 1-𝛿</sub>** denotes the **1-𝛿** quantile of chi-square distribution with **k-1** degrees of freedom. **z<sub>1-𝛿</sub>** denotes the **1-𝛿** quantile of a standard normal random variable.
+
+The equation means that if the number of particles **N** is larger than **n** expressed above, the **K-L distance** between the maximum likelihood estimation based the particles and the true distribution has probability **1-𝛿** to be less than **ε**.
+
+Here in practice the number of bins, which is the number of state clusters, is usually no larger than 10, thus with the particles already exist in AMCL (usually >5000, even with the minimum required number of particles), the ideal posterior can be approximated quite well with **K-L distance -> 0** in each resample step.
+
+Here is how it works:
+
+<p align = "center">
+  <img src = "files/Fig8.png">
+</p>
+
+<p align="center">
+  <b>Fig 7. Adaptive Threshold </b><br>
+</p>
+
+In Fig 7, the fake reading **z<sub>fake,1</sub>** is generated from **X<sub>1</sub>**, under such condition we have:
+
+<p align = "left">
+  <img src = "files/eq4.png">
+</p>
+
+However, the condition that fake reading generated from **X<sub>2</sub>** should also be considered. If so, the condition will be pretty similar and at last **N<sub>x1</sub> = 33** and **N<sub>x2</sub> = 67**. Thus the expectation of minimum posterior after **N=1** iteration is:
+
+<p align = "left">
+  <img src = "files/eq5.png">
+</p>
+
+We keep calculating such expectation over iterations. If such expectation is less than **0.001** after **N** iterations, state group of **{X<sub>1</sub>, X<sub>2</sub>}** is considered to be the desired state group and the robot is navigated by the corresponding control data **u**.
+
 
 ## Acknowledgement
 This is a final project done by Zhicheng Yu during his final quarter in MSR (Master of Science in Robotics) program at Northwestern University. It is supervised by Prof. Ying Wu and Prof. Matthew Elwin, who gave many valuable intuitions and considerations on this project.

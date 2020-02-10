@@ -606,17 +606,19 @@ void WakeUp::grid_map_search()
         }
         else {
           double lhs_known_prob = 0.0;
+          // if total 1000 particles, this means less than 1 partile left in bad cluster
+          // after CONVERGE_ITE_LIMIT
           double prob_threshold = 0.001;
-          grid_found = true;
           // simulate fake readings of all clusters
+          // work space ofr E[E[wi,N|p(i true)]]
+          vector<double> total_expect(cluster_poses.size(), 0.0);
+          grid_found = true;
           for (simu_index=0; simu_index<cluster_poses.size(); simu_index++) {
             laserSimulate(simu_index);
             LikelihoodFieldModel(fake_readings, cluster_poses_tmp); 
-            sample_vector_t min_po_pose;
-            min_po_pose = evaluate_scores_prob(cluster_scores, cluster_poses_tmp);
+            sample_vector_t min_po_pose = evaluate_scores_prob(cluster_scores, cluster_poses_tmp);
             
             double simul_prob = min_po_pose.po * cluster_poses_tmp[simu_index].pr;
-          
             if (simul_prob >= prob_threshold) {
               grid_found = false;
               break;
@@ -706,7 +708,7 @@ void WakeUp::SimuBeamModelConfig()
   private_nh_.param("laser_z_rand", z_rand, 0.5);
   private_nh_.param("laser_sigma_hit", sigma_hit, 0.2);
   private_nh_.param("laser_max_beams", max_beams, 48);
-  private_nh_.param("wakeup_score_threshold", score_threshold, 50.0);
+  private_nh_.param("wakeup_score_threshold", score_threshold, 0.03);
   private_nh_.param("laser_max_range", max_range, 2.0);
   private_nh_.param("laser_min_range", min_range, 0.1);
   private_nh_.param("if_debug", DEBUG, false);
