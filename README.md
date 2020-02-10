@@ -235,13 +235,13 @@ Here is how it works:
 In Fig 7, the fake reading **z<sub>fake,1</sub>** is generated from **X<sub>1</sub>**, under such condition we have:
 
 <p align = "left">
-  <img src = "files/eq4.png">
+  <img src = "files/eq4.png" height = "45px">
 </p>
 
 However, the condition that fake reading generated from **X<sub>2</sub>** should also be considered. If so, the condition will be pretty similar and at last **N<sub>x1</sub> = 33** and **N<sub>x2</sub> = 67**. Thus the expectation of minimum posterior after **N=1** iteration is:
 
 <p align = "left">
-  <img src = "files/eq5.png">
+  <img src = "files/eq5.png" height = "110px">
 </p>
 
 We keep calculating such expectation over iterations. If such expectation is less than **0.001** after **N** iterations, state group of **{X<sub>1</sub>, X<sub>2</sub>}** is considered to be the desired state group and the robot is navigated by the corresponding control data **u**.
