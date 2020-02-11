@@ -100,7 +100,7 @@ potential state hypotheses, as shown in Fig 2.
 ## Method
 This method is only based on **2D laser scan** and **map features**. The idea is simple: Since the map is given, the robot itself is going to find out the states with different map features and drive itself there, then based on the true sensor reading, AMCL will drop out less likely potential state. The robot will iterate such step until AMCL converges.
 
-For example, assuming we have a robot located at the bottom left of the given map as shown in Fig 3. After the robot is boot up without any information about initial state, AMCL global initialization will result into three potential states. In such scenario, the sensor reading under these three states look pretty similar. For convenience, we denote that the potential states **x<sub>1</sub>**, **x<sub>2</sub>** and **x<sub>3</sub>** form a **current potential states set X<sub>0</sub>**.
+For example, assuming we have a robot located at the bottom left of the given map as shown in Fig 3. After the robot is boot up without any information about initial state, AMCL global initialization will result into three potential states. In such scenario, the sensor reading under these three states look pretty similar. For convenience, we denote that the potential states **x<sub>1</sub>**, **x<sub>2</sub>** and **x<sub>3</sub>** form a **current potential state group X<sub>0</sub>**.
 
 <p align = "center">
   <img src = "files/Fig3.png" height = "300px">
@@ -109,13 +109,13 @@ For example, assuming we have a robot located at the bottom left of the given ma
   <b>Fig 3. Robot running in a 2D grid map, where green points denote particles</b><br>
 </p>
 
-To recover from such wake-up failure, the robot is going to generate a new potential states set G1, which represents the fake potential states derived by taking the same control for each state in G0. For each fake new state, as shown in Fig 4(a), we can observe that the sensor reading at x<sub>2'</sub> look quite different from that at **x<sub>1'</sub>** and **x<sub>3'</sub>**. Thus if the robot gets there AMCL will automatically drop out the potential state cluster **x<sub>2</sub>**, while potential states clusters **x<sub>1</sub>** and **x<sub>3</sub>** still remain because the sensor readings at those states still look similar, shown as Fig 4(b).
+To recover from such wake-up failure, the robot is going to generate a new potential state group G1, which represents the fake potential states derived by taking the same control for each state in G0. For each fake new state, as shown in Fig 4(a), we can observe that the sensor reading at x<sub>2'</sub> look quite different from that at **x<sub>1'</sub>** and **x<sub>3'</sub>**. Thus if the robot gets there AMCL will automatically drop out the potential state cluster **x<sub>2</sub>**, while potential states clusters **x<sub>1</sub>** and **x<sub>3</sub>** still remain because the sensor readings at those states still look similar, shown as Fig 4(b).
 
 <p align = "center">
   <img src = "files/Fig4a.png" height = "300px">
 </p>
 <p align="center">
-  <b>Fig 4(a). Fake potential states set and sensor readings, where orange arrows denote the control</b><br>
+  <b>Fig 4(a). Fake potential state group and sensor readings, where orange arrows denote the control</b><br>
 </p>
 
 <p align = "center">
@@ -131,7 +131,7 @@ To eliminate the remaining potentialty, the robot will just do the same step as 
   <img src = "files/Fig5a.png" height = "300px">
 </p>
 <p align="center">
-  <b>Fig 5(a). Fake potential states set and sensor readings, where orange arrows denote the control</b><br>
+  <b>Fig 5(a). Fake potential state group and sensor readings, where orange arrows denote the control</b><br>
 </p>
 
 <p align = "center">
@@ -142,7 +142,7 @@ To eliminate the remaining potentialty, the robot will just do the same step as 
 </p>
 
 ### Grid Map Searching
-As implied above, we have to find the **control** which can take the old state cluster set to a new one which consists of states where the lidar sensor can get different readings. Actually we don't necessarily need to find out the **control**, instead it will be much easier to find the new potential states set with that feature. To do this, for the current potential states set, we can do **grid map searching** to figure this out.
+As implied above, we have to find the **control** which can take the old state group to a new one which consists of states where the lidar sensor can get different readings. Actually we don't necessarily need to find out the **control**, instead it will be much easier to find the new potential state group with that feature. To do this, for the current potential state group, we can do **grid map searching** to figure this out.
 
 <p align = "center">
   <img src = "files/Fig6.png" height = "300px">
@@ -155,7 +155,7 @@ As implied above, we have to find the **control** which can take the old state c
 
 As shown in Fig 6, we use two potential states **x<sub>1</sub>** and **x<sub>3</sub>** as examples from the previous case. For the first searched grids pair (two grids marked with index 1), each one's relative transformation to its corresponding potential state is the same as another one's. The searching processes in a **inflating spiral** order with its center at each potential state.
 
-In each searching iteration, a new potential states set is generated. We pick one state from the new potential potential states set and generate its fake sensor reading **z<sub>fake** based on the given map **m**. Then for each potential state in the current searching potential states set we calculate the score **p(z<sub>fake</sub> | map, x<sub>i</sub>)** for all potential state **x<sub>i**. To figure out if there exists a big difference among them, we calculate the maximum L2 distance. If the maximum L2 distance **D<sub>L2</sub> > ε<sub>L2</sub>**, where **ε<sub>L2</sub>** is a preset threshold, the searching terminates and the robot will navigate to that state.
+In each searching iteration, a new potential state group is generated. We pick one state from the new potential potential state group and generate its fake sensor reading **z<sub>fake** based on the given map **m**. Then for each potential state in the current searching potential state group we calculate the score **p(z<sub>fake</sub> | map, x<sub>i</sub>)** for all potential state **x<sub>i**. To figure out if there exists a big difference among them, we calculate the maximum L2 distance. If the maximum L2 distance **D<sub>L2</sub> > ε<sub>L2</sub>**, where **ε<sub>L2</sub>** is a preset threshold, the searching terminates and the robot will navigate to that state.
 
 The implementation of such idea looks like this with a little difference:
 
@@ -170,7 +170,7 @@ The implementation of such idea looks like this with a little difference:
 
 
 ### Experimental Results
-Since this method only cares about static map, it’s not hard to capture the potential states set with ‘featured states’ in static environment. Once the ‘featured states’ are captured, AMCL always converges well when the robot gets there, as can be observed in the video. The speed of convergence depends on the threshold **ε<sub>L2</sub>**. How to set **ε<sub>L2</sub>** should depend on the task (e.g. the further we allow the robot to move, the larger **ε<sub>L2</sub>** can be set, because when the grid map searching gets further, it has larger probability to capture the featured states
+Since this method only cares about static map, it’s not hard to capture the potential state group with ‘featured states’ in static environment. Once the ‘featured states’ are captured, AMCL always converges well when the robot gets there, as can be observed in the video. The speed of convergence depends on the threshold **ε<sub>L2</sub>**. How to set **ε<sub>L2</sub>** should depend on the task (e.g. the further we allow the robot to move, the larger **ε<sub>L2</sub>** can be set, because when the grid map searching gets further, it has larger probability to capture the featured states
 with big difference).
 
 Also since we only do ray casting once in each iteration, the computation complexity is not that large. It should be fine to run this package on-chip only if the remote PC is relatively powerful.
@@ -184,19 +184,19 @@ So far there are two drawbacks in this method:
 3. Since the global initialization is required, the number of initial particles needs to be quite large to capture all potential states, otherwise the true state may be lost. This results in a slow convergence at the beginning, thus this method is not suitable for the scenario where the robot has to locate itself quickly after boot up.
 
 ### Adaptive Threshold
-Recall that the **drop out bad state clusters** step processes based on AMCL resample step. We wait for bad state clusters to be dropped out after the robot taking the control **u** to navigate to the desired state set.
+Recall that the **drop out bad state clusters** step happens during AMCL resample step. The robot will stay still to wait for bad state clusters to be dropped out after taking the control **u** data.
 
-To judge if current searching state set is the desired one, previously we used a threshold **ε<sub>L2</sub>**, which is a fixed **L2 distance** between measurement scores. Such threshold is chosen completely depending on practice, which doesn't make much sense.
+To judge if current searching state group is the desired one, previously we used a threshold **ε<sub>L2</sub>**, which is a fixed **L2 distance** between measurement scores. Such threshold is chosen completely depending on practice, which doesn't make much sense.
 
-Alternatively, an adaptive threshold can be adopted. As is proposed, a fake sensor reading is generated in each searching step, from which we can calculate the cumulative posterior of each state after a certain iterations:
+Alternatively, an adaptive threshold can be adopted. As is proposed, a fake sensor reading is generated in each searching step, from which we can calculate the cumulative posterior of each state after a certain number of iterations:
 
 <p align = "left">
   <img src = "files/eq0.png">
 </p>
 
-where **j** denotes the **id** of uncertain state cluster, **i** denotes the state cluster from which the fake ray casting is generated, **N (the number we set)** denotes the number of iterations, **η** denotes the normalize term.
+where **j** denotes the **id** of uncertain state cluster, **i** denotes the state cluster from which the fake ray casting is generated, **N (a number we set)** denotes the number of iterations, **η** denotes the normalization term.
 
-For this case, we assume that a state cluster is dropped out if the weight of it is less than **e = 0.001** (set manually) after **N** iterations once the robot is navigated to that "state set":
+For this case, we assume that a state cluster is dropped out if the weight of it is less than **e = 0.001** (set manually) after **N** iterations after the robot taking the control data **u**:
 
 <p align = "left">
   <img src = "files/eq1.png">
@@ -208,9 +208,9 @@ However, we are not sure if the state cluster **i**, from which the fake reading
   <img src = "files/eq2.png">
 </p>
 
-If the expectation above is less than **e**, which means by the time after **N** iterations, the particles of at least one state cluster are dying out.
+Where **k** denotes the number of state clusters. If the expectation above is less than **e** after **N** iterations, we assume the particles of at least one state cluster are dropped out.
 
-The calculated belief(posterior) above is under ideal condition, in practice AMCL uses large number of particles to approximate the probability distribution of states. In this case, the belief of each state cluster can be viewed as a bin of a **multinomial distribution**.  From [KLD-Sampling](https://papers.nips.cc/paper/1998-kld-sampling-adaptive-particle-filters.pdf) we know:
+The calculated belief (posterior) above is under ideal condition, in practice AMCL uses large number of particles to approximate the probability distribution of states. In this case, the belief of each state cluster can be viewed as a bin of a **multinomial distribution**.  From [KLD-Sampling](https://papers.nips.cc/paper/1998-kld-sampling-adaptive-particle-filters.pdf) we know:
 
 <p align = "left">
   <img src = "files/eq3.png">
@@ -218,11 +218,11 @@ The calculated belief(posterior) above is under ideal condition, in practice AMC
 
 where **n** denotes the number of particles, **ε** denotes the **K-L** distance between approximated distribution and the true distribution, **k** denotes the number of bins, **X<sub>k-1, 1-𝛿</sub>** denotes the **1-𝛿** quantile of chi-square distribution with **k-1** degrees of freedom. **z<sub>1-𝛿</sub>** denotes the **1-𝛿** quantile of a standard normal random variable.
 
-The equation means that if the number of particles **N** is larger than **n** expressed above, the **K-L distance** between the maximum likelihood estimation (MLE) based the particles and the true distribution has probability **1-𝛿** to be less than **ε**.
+The equation means that if the number of particles **N** is larger than **n** expressed by the equation above, the **K-L distance** between the maximum likelihood estimation (MLE) based the particles and the true distribution has probability **1-𝛿** to be less than **ε**.
 
-Here in practice the number of bins, which is the number of state clusters, is usually no larger than 10, thus with the particles already exist in AMCL (usually >5000), the ideal posterior can be approximated quite well with the **K-L distance -> 0** between itself and the **MLE** approximation in each resample step.
+In practice the number of bins, which is the number of state clusters, is usually no larger than 10, thus with the particles already exist in AMCL (usually >5000), the ideal posterior can be approximated quite well with the **K-L distance -> 0** between itself and the **MLE** approximation in each resample step.
 
-Here shows the case that the current searching state group are presented as below. The prior of two states are both 0.5, which meas they have the same number of particles. In this case we use the **z<sub>fake,1</sub>** generated from **X<sub>1</sub>** to show the process:
+Here Fig 7 shows the case that the current searching state group are presented as below. The prior of two states are both 0.5, which meas they have the same number of particles. In this case we use the **z<sub>fake,1</sub>** generated from **X<sub>1</sub>** to show the process:
 
 <p align = "center">
   <img src = "files/Fig8.png">
@@ -238,7 +238,7 @@ Under such condition we have:
   <img src = "files/eq4.png" height = "45px">
 </p>
 
-However, the condition that fake reading generated from **X<sub>2</sub>** should also be considered. If so, the condition will be pretty similar and at last **N<sub>x1</sub> = 33** and **N<sub>x2</sub> = 67**. Thus the expectation of minimum posterior after **N=1** iteration is:
+However, the condition that fake reading generated from **X<sub>2</sub>** should also be considered. If so, the calculation will be pretty similar and at last **N<sub>x1</sub> = 33** and **N<sub>x2</sub> = 67**. Thus the expectation of minimum posterior after **N=1** iteration is:
 
 <p align = "left">
   <img src = "files/eq5.png" height = "110px">
@@ -246,15 +246,14 @@ However, the condition that fake reading generated from **X<sub>2</sub>** should
 
 We keep calculating such expectation over iterations. If such expectation is less than **0.001** after **N** iterations, state group of **{X<sub>1</sub>, X<sub>2</sub>}** is considered to be the desired state group and the robot is navigated by the corresponding control data **u**.
 
-Since in practice, during the navigation by control data **u**, AMCL still keeps reasampling based on true sensor reading. Thus the true priors of all state clusters usually present in such way: the more-likely state usually has larger prior than expected (which is the prior before taking **u**) while the less-likely state usually has less prior than expected (which is the prior before taking control **u**) after the control **u** finishing its navigation.
+Since in practice, during the navigation by control data **u**, AMCL still keeps reasampling based on true sensor reading. Thus the true priors of all state clusters usually present in such way: the more-likely state usually has larger prior than expected (which is the prior before taking **u**) while the less-likely state usually has smaller prior than expected (which is the prior before taking control **u**) after the navigation by control **u** is finished.
 
 If such method is used instead of a fixed threshold of L2 distance, the threshold can be adaptive which always **bounds the number of iterations <= N (the number we set)** before at least one cluster is dropped after taking control data **u**.
 
-
 ## Acknowledgement
-This is a final project done by Zhicheng Yu during his final quarter in MSR (Master of Science in Robotics) program at Northwestern University. It is supervised by Prof. Ying Wu and Prof. Matthew Elwin, who gave many valuable intuitions and considerations on this project.
+This is Zhicheng Yu's final project in MSR (Master of Science in Robotics) program supervised by Prof. Ying Wu and Prof. Mattew Elwin. Thanks for their valuable advises and considerations for this project.
 
-Also, it will be helpful to look up to raw AMCL ROS repo and AMCL papers:
+For reference, the paper of AMCL and its raw ROS repo are attached below:
 
 1.[amcl-ROS Wiki](http://wiki.ros.org/amcl)
 
