@@ -1,1 +1,7 @@
-files/debug.bag
+files/
+.vscode/
+test/
+CHANGELOG.rst
+Makefile
+mainpage.dox
+
