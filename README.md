@@ -48,7 +48,7 @@ $ roslaunch amcl_wakeup world_amcl_wakeup.launch
 
 and then load the map file:
 ```
-$ roslaunch amcl_wakeup turtlebot3_navigation.launch map_file:=/home/zhicheng/turtlebot3ws/src/amcl_wakeup/maps/map_asym_longhallway_2.yaml
+$ roslaunch amcl_wakeup turtlebot3_navigation.launch map_file:=$PATH_TO_YOUR_MAP
 ```
 
 Otherwise if you run this package in **real world**, just run:
@@ -164,7 +164,7 @@ The implementation of such idea looks like this with a little difference:
 </p>
 
 <p align="center">
-  <b>Fig 7. Grid Map Searcing </b><br>
+  <b>Fig 7. Grid Map Searching </b><br>
 </p>
 
 
